@@ -3,7 +3,7 @@
 {
   # https://devenv.sh/packages/
   packages = with pkgs; [
-    cargo rustc
+    cargo rustc clippy
     cmake clang pkg-config glslang libclang shaderc
     libxkbcommon vulkan-headers vulkan-loader wayland
   ];

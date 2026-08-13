@@ -15,15 +15,27 @@ loop de eventos (threads `std` + canais `mpsc`, sem async).
 ## Comandos
 
 ```sh
-devenv shell                 # ambiente de dev (ou: nix develop --no-pure-eval)
-cargo build --release
-cargo test --release
+devenv shell                 # ambiente de dev (NÃO USE NIX PARA BUILD ENQUANTO DESENVOLVE!)
+cargo build
+cargo test
 ./target/release/whisper start | status | stop | toggle
 # integração (ignorada): WHISPER_MODEL=... WHISPER_WAV=... cargo test --release transcribe_jfk -- --ignored
 ```
 
 Log do daemon: `~/.local/state/whisper/daemon.log`. Config:
 `~/.config/whisper/config.toml` (hot reload ~1 s, sem reiniciar o daemon).
+
+### Ambiente (build/teste)
+
+- **Sempre dentro do `devenv shell`** (`devenv shell -- cargo test`): fora dele
+  faltam `pkg-config`, `libxkbcommon`, `glslang` etc. e o build do
+  smithay-client-toolkit falha ("The pkg-config command could not be found").
+- **`target/` é incompatível entre o rustc do devenv (nix) e o do rustup**
+  (mesma versão, builds diferentes): alternar sem `cargo clean` causa
+  `error[E0514]` — limpe o `target/` ao trocar de toolchain.
+- **`cargo clippy` roda dentro do `devenv shell`** (`clippy` está no
+  `devenv.nix`); fora dele o `clippy-driver` do PATH é um shim do rustup e
+  quebra com E0514 contra o `target/` do nix.
 
 ## Invariantes — não quebrar
 
