@@ -36,9 +36,14 @@ Log do daemon: `~/.local/state/whisper/daemon.log`. Config:
 3. **Download idempotente**: falha remove o arquivo parcial (`model.rs`);
    nunca deixar um modelo corrompido que um `setup` seguinte pule.
 4. **Daemon nunca fica como zumbi**: erro de socket na subida = exit 1.
-5. **Sem async runtime** — threads + canais, como o resto do código.
-6. **pt-BR** em comentários, mensagens de erro e docs.
-7. **Caminhos XDG** sempre pelos helpers de `config.rs`.
+5. **Daemon sempre do mesmo binário que o CLI**: o `start` compara o `exe`
+   do daemon (via `status`) com o próprio `current_exe`; diferente (ou
+   desconhecido = versão antiga) → derruba e sobe o atual. Não "otimize"
+   isso: um daemon de outra origem não tem o wrapper do flake (wtype no
+   PATH).
+6. **Sem async runtime** — threads + canais, como o resto do código.
+7. **pt-BR** em comentários, mensagens de erro e docs.
+8. **Caminhos XDG** sempre pelos helpers de `config.rs`.
 
 ## Onde está cada coisa
 

@@ -24,6 +24,11 @@ pub struct Response {
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Binário que executa o daemon (preenchido em `status`). Ausente em
+    /// daemons de versões antigas — o CLI trata como "outra origem" e
+    /// reinicia.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exe: Option<String>,
 }
 
 /// Envia um comando ao daemon e aguarda a resposta (lado CLI).
@@ -74,4 +79,31 @@ where
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resposta_de_daemon_antigo_sem_exe() {
+        // Compatibilidade: daemon de versão anterior não envia `exe` — o
+        // campo deve desserializar como None (e o CLI reinicia o daemon).
+        let resp: Response = serde_json::from_str(r#"{"ok":true,"state":"idle"}"#).unwrap();
+        assert_eq!(resp.exe, None);
+    }
+
+    #[test]
+    fn exe_serializa_e_roundtrip() {
+        let resp = Response {
+            ok: true,
+            state: "idle".to_string(),
+            error: None,
+            exe: Some("/nix/store/x-whisper/bin/.whisper-wrapped".to_string()),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"exe\":\"/nix/store/x-whisper/bin/.whisper-wrapped\""));
+        let back: Response = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.exe.as_deref(), Some("/nix/store/x-whisper/bin/.whisper-wrapped"));
+    }
 }

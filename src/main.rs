@@ -72,13 +72,24 @@ fn main() -> Result<()> {
 
 /// Sobe o daemon destacado do terminal: sessão própria (sobrevive ao fechar o
 /// shell), stdout/stderr para `~/.local/state/whisper/daemon.log`. Idempotente:
-/// com o daemon já rodando, apenas avisa.
+/// com o daemon já rodando (e sendo ESTE binário), apenas avisa.
 fn start() -> Result<()> {
-    if ipc::request(ipc::Cmd::Status).is_ok() {
-        println!("whisper já está rodando");
-        return Ok(());
-    }
     let exe = std::env::current_exe().context("localizando o próprio executável")?;
+    // Um daemon de outra origem (ex.: build de dev sem o wrapper do flake)
+    // não tem wtype no PATH — a digitação quebraria. Diferente → reinicia.
+    match ipc::request(ipc::Cmd::Status) {
+        Ok(resp) => {
+            let mesmo = resp.exe.as_deref() == exe.to_str();
+            if mesmo {
+                println!("whisper já está rodando");
+                return Ok(());
+            }
+            println!("daemon de outra origem — reiniciando com este binário");
+            let _ = ipc::request(ipc::Cmd::Stop);
+            wait_daemon_exit()?;
+        }
+        Err(_) => {} // sem daemon: segue para subir
+    }
     let log = crate::config::log_path();
     if let Some(parent) = log.parent() {
         std::fs::create_dir_all(parent)?;
@@ -114,10 +125,25 @@ fn start() -> Result<()> {
     bail!("daemon não respondeu; veja o log: {}", log.display())
 }
 
+/// Aguarda o daemon antigo remover o socket após o `stop` (até ~5 s).
+fn wait_daemon_exit() -> Result<()> {
+    for _ in 0..50 {
+        if ipc::request(ipc::Cmd::Status).is_err() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    bail!("daemon antigo não saiu após o stop; verifique o log: {}", crate::config::log_path().display())
+}
+
 fn print_response(resp: &ipc::Response) {
     if let Some(err) = &resp.error {
         eprintln!("whisper: {err}");
         std::process::exit(1);
     }
     println!("{}", resp.state);
+    if let Some(exe) = &resp.exe {
+        // Origem do daemon — útil para detectar daemon de outra build.
+        println!("daemon: {exe}");
+    }
 }

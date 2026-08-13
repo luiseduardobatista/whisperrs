@@ -126,6 +126,7 @@ impl Daemon {
                                 ok: true,
                                 state: "stopping".to_string(),
                                 error: None,
+                                exe: None,
                             });
                             break;
                         }
@@ -198,7 +199,21 @@ impl Daemon {
             Cmd::Status => {}
             Cmd::Stop => {} // interceptado no loop_forever antes de chegar aqui
         }
-        Response { ok: true, state: self.state_str().to_string(), error: None }
+        let mut resp = Response {
+            ok: true,
+            state: self.state_str().to_string(),
+            error: None,
+            exe: None,
+        };
+        if matches!(cmd, Cmd::Status) {
+            // O CLI compara com o próprio binário: daemon de outra origem
+            // (ex.: build de dev sem o wrapper do flake) é reiniciado no
+            // próximo `start`.
+            resp.exe = std::env::current_exe()
+                .ok()
+                .map(|p| p.display().to_string());
+        }
+        resp
     }
 
     fn state_str(&self) -> &'static str {
