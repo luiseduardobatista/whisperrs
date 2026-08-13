@@ -21,7 +21,10 @@ cargo build --release
 ```
 
 Dependências de runtime (fora do shell): `pw-record` (PipeWire), `wtype`,
-`wl-copy`, driver Vulkan. O stderr do daemon em background vai para
+`wl-copy`, driver Vulkan. O pacote do flake (`nix build .#default`) já inclui
+`wtype` e `wl-copy` no PATH via wrapper; instalando por outros meios,
+instale-os no sistema — o app avisa (console, log e rodapé do OSD) se
+`wtype` estiver ausente. O stderr do daemon em background vai para
 `~/.local/state/whisper/daemon.log`; para ver logs ao vivo, rode `whisper
 daemon` em primeiro plano.
 
@@ -134,6 +137,9 @@ cargo test --release transcribe_jfk -- --ignored
   erros de engine, falhas de inserção).
 - Falha de inserção não é visível no OSD (já fechado): olhe o
   `daemon.log` ("inserção falhou (texto no clipboard)").
+- Se `wtype` estiver ausente do PATH, `whisper start` avisa no console e o
+  daemon registra o aviso no log na subida — instale o pacote e reinicie o
+  daemon.
 
 ## Conventions
 

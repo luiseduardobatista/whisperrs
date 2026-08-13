@@ -16,6 +16,8 @@ use std::fs::OpenOptions;
 use std::os::unix::process::CommandExt;
 use std::process::{Command as Proc, Stdio};
 
+use crate::config::{Config, InsertMode};
+
 #[derive(Parser)]
 #[command(name = "whisper", version, about = "Ditado por voz com whisper.cpp + Vulkan")]
 struct Cli {
@@ -97,6 +99,13 @@ fn start() -> Result<()> {
     for _ in 0..10 {
         if ipc::request(ipc::Cmd::Status).is_ok() {
             println!("whisper rodando (log: {})", log.display());
+            // Aviso imediato no console: o aviso do daemon só aparece no log.
+            let cfg = Config::load().unwrap_or_default();
+            if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both)
+                && !insert::wtype_available()
+            {
+                println!("aviso: wtype não encontrado no PATH — {}", insert::wtype_hint());
+            }
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_millis(200));

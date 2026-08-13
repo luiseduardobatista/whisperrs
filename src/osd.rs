@@ -69,13 +69,21 @@ pub enum Phase {
 pub struct UiState {
     pub phase: Phase,
     pub status: Option<String>,
+    /// Aviso persistente exibido no rodapé do cartão (ex.: wtype ausente).
+    pub warning: Option<String>,
     pub levels: VecDeque<f32>,
     pub lang_model: String,
 }
 
 impl UiState {
     pub fn new(lang_model: String) -> UiState {
-        UiState { phase: Phase::Loading, status: None, levels: VecDeque::new(), lang_model }
+        UiState {
+            phase: Phase::Loading,
+            status: None,
+            warning: None,
+            levels: VecDeque::new(),
+            lang_model,
+        }
     }
 
     pub fn push_level(&mut self, rms: f32) {
@@ -645,17 +653,21 @@ fn draw_card(pix: &mut Pixmap, t: Transform, ui: &UiState, font: &FontArc) {
         t,
     );
 
-    // Dicas de hotkeys.
+    // Rodapé: dicas de hotkeys, ou o aviso (ex.: wtype ausente) quando houver.
     let hints = "Space pausar   ·   Enter concluir   ·   Esc cancelar";
-    let hw = measure(font, hints, 12.0);
+    let (footer, color) = match &ui.warning {
+        Some(w) => (w.as_str(), (241, 196, 15, 255)), // âmbar: atenção
+        None => (hints, (120, 120, 130, 255)),
+    };
+    let fw = measure(font, footer, 12.0);
     draw_text(
         pix,
         font,
-        hints,
-        cx + (w - hw) / 2.0,
+        footer,
+        cx + (w - fw) / 2.0,
         cy + 164.0,
         12.0,
-        (120, 120, 130, 255),
+        color,
         w - 40.0,
         t,
     );
@@ -778,6 +790,17 @@ mod tests {
         assert!(m2 > m1);
     }
 
+    #[test]
+    fn aviso_do_rodape_cabe_no_cartao() {
+        // O aviso de wtype ausente (e as dicas padrão) não podem estourar a
+        // largura do cartão; draw_text truncaria com "…", perdendo info.
+        let f = font();
+        let msg = "wtype ausente — a digitação na app não vai funcionar (só clipboard)";
+        assert!(measure(f, msg, 12.0) <= CARD_W - 40.0);
+        let hints = "Space pausar   ·   Enter concluir   ·   Esc cancelar";
+        assert!(measure(f, hints, 12.0) <= CARD_W - 40.0);
+    }
+
     /// Renderiza o OSD em PNG para inspeção visual (ignorado por padrão).
     #[test]
     #[ignore = "gera PNG para inspeção visual"]
@@ -794,5 +817,13 @@ mod tests {
         );
         draw_card(&mut pix, Transform::identity(), &ui, font());
         pix.save_png("/tmp/whisper-osd.png").unwrap();
+
+        // Variante com aviso de wtype ausente no rodapé.
+        let mut pix = Pixmap::new(1920, 180).unwrap();
+        let mut ui = UiState::new("pt · turbo".to_string());
+        ui.phase = Phase::Recording;
+        ui.warning = Some("wtype ausente — a digitação na app não vai funcionar (só clipboard)".to_string());
+        draw_card(&mut pix, Transform::identity(), &ui, font());
+        pix.save_png("/tmp/whisper-osd-warning.png").unwrap();
     }
 }

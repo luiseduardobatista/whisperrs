@@ -1,5 +1,6 @@
 //! Wizard de configuração: língua, modelo e download automático.
-use crate::config::{Config, Language};
+use crate::config::{Config, InsertMode, Language};
+use crate::insert;
 use crate::model::{self, ModelSpec};
 use anyhow::{bail, Result};
 use dialoguer::theme::ColorfulTheme;
@@ -71,6 +72,15 @@ pub fn run(lang_flag: Option<String>, model_flag: Option<String>) -> Result<()> 
     println!("  2. bind no compositor, ex. Niri:");
     println!("     Mod+Shift+Space = spawn \"whisper toggle\"");
     println!("  3. fale e use no popup: Space pausar · Enter concluir · Esc cancelar");
+
+    if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both)
+        && !insert::wtype_available()
+    {
+        println!();
+        println!("aviso: 'wtype' não está no PATH — a digitação na app focada não vai funcionar");
+        println!("  (o texto ficará só no clipboard). {}", insert::wtype_hint());
+        println!("  Depois de instalar, reinicie o daemon (whisper stop && whisper start).");
+    }
     Ok(())
 }
 

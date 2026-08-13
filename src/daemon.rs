@@ -1,7 +1,7 @@
 //! Daemon: orquestra as sessões de ditado — estado, áudio (pw-record),
 //! OSD (teclas), transcrição (whisper-rs) e inserção (wtype/wl-copy).
 use crate::audio::{self, Capture};
-use crate::config::{config_mtime, Config};
+use crate::config::{config_mtime, Config, InsertMode};
 use crate::insert;
 use crate::ipc::{self, Cmd, Response};
 use crate::osd::{OsdCommand, OsdEvent, Phase as UiPhase, UiState};
@@ -87,9 +87,24 @@ pub fn run() -> Result<()> {
         events_rx,
         events_tx,
     };
+    warn_if_wtype_missing(&daemon.cfg);
     daemon.loop_forever();
     let _ = std::fs::remove_file(crate::config::socket_path());
     Ok(())
+}
+
+/// Avisa (no stderr → daemon.log) se o wtype faltar no PATH quando o modo de
+/// inserção depende dele: a digitação na app vai falhar e sobra só o clipboard.
+fn warn_if_wtype_missing(cfg: &Config) {
+    if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both)
+        && !insert::wtype_available()
+    {
+        eprintln!(
+            "whisper: aviso: wtype não encontrado no PATH — a digitação na app focada vai \
+             falhar (o texto irá só para o clipboard). {}",
+            insert::wtype_hint()
+        );
+    }
 }
 
 fn lang_model(cfg: &Config) -> String {
@@ -300,7 +315,18 @@ impl Daemon {
     }
 
     fn start_session(&mut self) {
-        self.ui = Arc::new(Mutex::new(UiState::new(lang_model(&self.cfg))));
+        let mut ui = UiState::new(lang_model(&self.cfg));
+        // Aviso visível no OSD (rodapé do cartão): sem wtype o texto não é
+        // digitado na app focada e fica só no clipboard — o usuário vê antes
+        // de ditar, mesmo que o daemon tenha subido sem console.
+        if matches!(self.cfg.insert_mode, InsertMode::Type | InsertMode::Both)
+            && !insert::wtype_available()
+        {
+            ui.warning = Some(
+                "wtype ausente — a digitação na app não vai funcionar (só clipboard)".to_string(),
+            );
+        }
+        self.ui = Arc::new(Mutex::new(ui));
         let (osd_tx, osd_rx) = channel();
         let (osd_ev_tx, osd_ev_rx) = channel::<OsdEvent>();
         let ui = self.ui.clone();

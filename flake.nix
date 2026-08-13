@@ -32,7 +32,7 @@
     in {
       default = pkgs.rustPlatform.buildRustPackage {
         pname = "whisper";
-        version = "0.1.0";
+        version = "0.1.1";
         src = ./.;
         cargoLock.lockFile = ./Cargo.lock;
         nativeBuildInputs = [
@@ -50,6 +50,7 @@
         '';
         postInstall = ''
           wrapProgram $out/bin/whisper \
+            --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.wtype pkgs.wl-clipboard ]}" \
             --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath [ pkgs.libxkbcommon pkgs.vulkan-loader ]}"
         '';
       };
