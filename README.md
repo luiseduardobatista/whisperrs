@@ -8,7 +8,41 @@ Inspirado no [whisrs](https://github.com/y0sif/whisrs), com a diferença
 central: o whisper.cpp é usado **upstream com GPU** (Vulkan → RADV em AMD,
 também funciona em NVIDIA via driver Vulkan).
 
-## Fluxo
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Como funciona](#como-funciona)
+- [Uso](#uso)
+- [Configuração](#configuração)
+- [Build](#build)
+- [Documentação](#documentação)
+- [Notas](#notas)
+
+---
+
+## Quick Start
+
+Build com o devShell (cmake/clang/vulkan):
+
+```bash
+nix develop          # entra no shell com cmake/clang/vulkan/etc.
+cargo build --release
+```
+
+Instale no PATH, configure e suba o daemon:
+
+```bash
+install -Dm755 target/release/whisper ~/.local/bin/whisper
+whisper setup              # wizard: língua (pt/en/auto) + modelo + download
+whisper start              # sobe o daemon em background (não trava o shell)
+```
+
+Dite: pressione a tecla do compositor (ou `whisper toggle`), fale e conclua
+com `Enter` — o texto é inserido na app focada.
+
+---
+
+## Como funciona
 
 ```
 [hotkey do compositor] ─► whisper toggle ─► daemon abre o OSD (borda inferior)
@@ -22,9 +56,51 @@ também funciona em NVIDIA via driver Vulkan).
 - Pós-processamento: corte de silêncio, remoção de fillers ("hmm", "ahn"…),
   capitalização/pontuação e período final.
 - Inserção: `wtype` digita na app focada + `wl-copy` coloca no clipboard
-  (modo configurável; se o wtype falhar, o texto está no clipboard).
+  (modo configurável; se o `wtype` falhar, o texto está no clipboard).
 - OSD em `wlr-layer-shell` (Niri, Sway, Hyprland, KDE ≥ 6.3, COSMIC) com
   fallback para janela xdg-toplevel (GNOME). Sem suporte a X11.
+
+---
+
+## Uso
+
+```bash
+whisper setup              # wizard: língua + modelo + download
+whisper start              # sobe o daemon em background (idempotente)
+whisper stop               # derruba o daemon
+whisper status             # estado do daemon
+whisper toggle             # inicia/cancela uma sessão (bind no compositor)
+whisper daemon             # daemon em primeiro plano (debug / systemd)
+```
+
+`whisper start` roda o daemon destacado do terminal (grupo de processo
+próprio, sobrevive ao fechar o shell) com log em
+`~/.local/state/whisper/daemon.log`; com o daemon já rodando, apenas avisa.
+
+Sessão de ditado:
+
+| Tecla | Ação |
+|-------|------|
+| `Space` | pausar/retomar a gravação |
+| `Enter` | concluir: transcreve, insere na app focada e fecha |
+| `Esc` | cancelar e descartar |
+
+Integrações (Niri, systemd) e problemas comuns: [docs/usage.md](docs/usage.md).
+
+---
+
+## Configuração
+
+`~/.config/whisper/config.toml` (gerada pelo `whisper setup`). O daemon
+observa o arquivo e recarrega na hora (hot reload, ~1 s): campos de sessão
+valem já na próxima sessão; trocar `model`/`gpu_device`/`threads` recarrega o
+modelo em background quando o daemon está ocioso (falha mantém o modelo
+atual). Config inválida é ignorada (mantém a anterior).
+
+Referência completa de opções, modelos e download:
+[docs/configuration.md](docs/configuration.md).
+
+---
 
 ## Build
 
@@ -35,71 +111,19 @@ cargo build --release
 
 Ou instale direto: `nix build` → `result/bin/whisper`.
 
-## Uso
+---
 
-```sh
-whisper setup              # wizard: língua (pt/en/auto) + modelo + download
-whisper daemon             # sobe o daemon (roda em background)
-whisper toggle             # bind no compositor (tecla para iniciar)
-whisper status             # estado do daemon
-```
+## Documentação
 
-Modelos (multilíngues, HuggingFace): `tiny`, `base`, `small`, `medium`,
-`large-v3`, `turbo` (default `turbo`). Ficam em
-`~/.local/share/whisper/models/`.
+- [docs/index.md](docs/index.md) — visão geral da documentação.
+- [docs/usage.md](docs/usage.md) — comandos, sessão de ditado, integrações e
+  troubleshooting.
+- [docs/configuration.md](docs/configuration.md) — `config.toml`, modelos e
+  hot reload.
+- [docs/development.md](docs/development.md) — arquitetura do código para
+  devs e agentes de IA.
 
-### Niri
-
-```kdl
-binds {
-    Mod+Shift+Space { spawn "whisper toggle"; }
-}
-spawn-at-startup "whisper daemon"
-```
-
-### systemd (qualquer DE/WM Wayland)
-
-```ini
-# ~/.config/systemd/user/whisper.service
-[Unit]
-Description=whisper daemon
-After=graphical-session.target pipewire.service
-PartOf=graphical-session.target
-
-[Service]
-ExecStart=/caminho/para/whisper daemon
-Restart=on-failure
-
-[Install]
-WantedBy=graphical-session.target
-```
-
-```sh
-systemctl --user enable --now whisper.service
-```
-
-No NixOS, prefira um `systemd.user.services` no config (e garanta que o
-binário encontre `libvulkan`/`libxkbcommon` em runtime).
-
-## Configuração
-
-`~/.config/whisper/config.toml` (gerada pelo `whisper setup`):
-
-```toml
-language = "pt"        # pt | en | auto
-model = "turbo"        # tiny | base | small | medium | large-v3 | turbo
-insert_mode = "both"   # type | clipboard | both
-remove_fillers = true  # remove "hmm", "ahn"…
-trim_silence = true    # corta silêncio das bordas e colapsa pausas longas
-punctuation = true     # capitaliza frases e normaliza espaços
-final_period = true    # garante ponto final
-gpu_device = 0
-threads = 4
-# source = "nome.do.no.pipewire"   # fonte de áudio explícita (pw-record --target)
-```
-
-A língua é **forçada** no modelo (mais rápido e preciso que auto-detect);
-`auto` deixa o whisper decidir. Acentos vêm do próprio modelo.
+---
 
 ## Notas
 
