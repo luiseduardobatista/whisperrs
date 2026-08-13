@@ -1,0 +1,35 @@
+# CI de release: quando uma release é publicada, builda o pacote do flake
+# dentro do shell do devenv — que empurra os store paths para o cachix
+# (luiseduardobatista) automaticamente. Suas máquinas NixOS então baixam o
+# binário pronto do cache em vez de rebuildar.
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: # testar o pipeline na mão, sem criar release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Nix + cache oficial do devenv (acelera a instalação do shell).
+      - uses: cachix/install-nix-action@v31
+      - uses: cachix/cachix-action@v16
+        with:
+          name: devenv
+          extraPullNames: luiseduardobatista
+
+      - name: Instala o devenv
+        shell: bash
+        run: nix profile add nixpkgs#devenv
+
+      # Dentro do shell do devenv, o cachix.push do devenv.nix empurra os
+      # store paths construídos para o cachix (precisa do token no ambiente).
+      - name: Build do pacote (devenv empurra pro cachix)
+        shell: devenv shell bash -- -e {0}
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: nix build .#default --accept-flake-config

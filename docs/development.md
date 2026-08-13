@@ -114,6 +114,19 @@ pega automaticamente; se ela afetar o engine, inclua-a na comparação de
   `write_at`); `200` → servidor sem Range, fallback para uma conexão.
 - Falha remove o arquivo parcial (idempotência: `dest.exists()` pula).
 
+## Releases e cachix
+
+- `release: types: [published]` (ou `workflow_dispatch` para testar na mão)
+  dispara `.github/workflows/release.yml`: builda `nix build .#default`
+  dentro do shell do devenv, que empurra os store paths para o cachix
+  (`luiseduardobatista.cachix.org`, via `cachix.push` no `devenv.nix`;
+  requer o secret `CACHIX_AUTH_TOKEN` no repo).
+- Máquinas NixOS consomem o cache pelo `nixConfig` do flake
+  (extra-substituters + public key) ou via `nix.settings` no
+  `configuration.nix` — baixam o binário pronto, sem rebuild.
+- Antes de lançar: bump da versão no `Cargo.toml` e no `flake.nix`, tag
+  `vX.Y.Z`, e release com `gh release create vX.Y.Z --generate-notes`.
+
 ## Testing
 
 ```sh
