@@ -10,8 +10,11 @@ mod postprocess;
 mod setup;
 mod transcribe;
 
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
+use std::fs::OpenOptions;
+use std::os::unix::process::CommandExt;
+use std::process::{Command as Proc, Stdio};
 
 #[derive(Parser)]
 #[command(name = "whisper", version, about = "Ditado por voz com whisper.cpp + Vulkan")]
@@ -22,7 +25,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Sobe o daemon (systemd user service / autostart do compositor).
+    /// Sobe o daemon em background (não trava o shell; log em daemon.log).
+    Start,
+    /// Derruba o daemon.
+    Stop,
+    /// Sobe o daemon em primeiro plano (debug / systemd user service).
     Daemon,
     /// Inicia uma sessão de ditado; ativo = cancela (bind no compositor).
     Toggle,
@@ -40,6 +47,12 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
+        Command::Start => start(),
+        Command::Stop => {
+            let resp = ipc::request(ipc::Cmd::Stop)?;
+            print_response(&resp);
+            Ok(())
+        }
         Command::Daemon => daemon::run(),
         Command::Toggle => {
             let resp = ipc::request(ipc::Cmd::Toggle)?;
@@ -53,6 +66,43 @@ fn main() -> Result<()> {
         }
         Command::Setup { lang, model } => setup::run(lang, model),
     }
+}
+
+/// Sobe o daemon destacado do terminal: sessão própria (sobrevive ao fechar o
+/// shell), stdout/stderr para `~/.local/state/whisper/daemon.log`. Idempotente:
+/// com o daemon já rodando, apenas avisa.
+fn start() -> Result<()> {
+    if ipc::request(ipc::Cmd::Status).is_ok() {
+        println!("whisper já está rodando");
+        return Ok(());
+    }
+    let exe = std::env::current_exe().context("localizando o próprio executável")?;
+    let log = crate::config::log_path();
+    if let Some(parent) = log.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)
+        .with_context(|| format!("abrindo log {}", log.display()))?;
+    let mut cmd = Proc::new(exe);
+    cmd.arg("daemon")
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(file.try_clone()?))
+        .stderr(Stdio::from(file))
+        .process_group(0); // processo próprio: não morre com o terminal
+    let mut child = cmd.spawn().context("subindo o daemon")?;
+    // Confirma que o daemon respondeu no socket antes de devolver o shell.
+    for _ in 0..10 {
+        if ipc::request(ipc::Cmd::Status).is_ok() {
+            println!("whisper rodando (log: {})", log.display());
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    let _ = child.kill();
+    bail!("daemon não respondeu; veja o log: {}", log.display())
 }
 
 fn print_response(resp: &ipc::Response) {

@@ -10,6 +10,7 @@ use std::sync::mpsc::Sender;
 pub enum Cmd {
     Toggle,
     Status,
+    Stop,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

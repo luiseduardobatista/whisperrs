@@ -1,14 +1,14 @@
 //! Daemon: orquestra as sessões de ditado — estado, áudio (pw-record),
 //! OSD (teclas), transcrição (whisper-rs) e inserção (wtype/wl-copy).
 use crate::audio::{self, Capture};
-use crate::config::Config;
+use crate::config::{config_mtime, Config};
 use crate::insert;
 use crate::ipc::{self, Cmd, Response};
 use crate::osd::{OsdCommand, OsdEvent, Phase as UiPhase, UiState};
 use crate::postprocess;
 use crate::transcribe::Engine;
 use anyhow::Result;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -27,10 +27,7 @@ struct AudioChunk {
 }
 
 enum WorkerOutcome {
-    Transcribed {
-        text: String,
-        inserted: Result<(), String>,
-    },
+    Transcribed { text: String },
     Failed(String),
 }
 
@@ -45,12 +42,19 @@ enum DaemonEvent {
 
 struct Daemon {
     cfg: Config,
+    /// mtime da config na última recarga (hot reload).
+    cfg_mtime: Option<std::time::SystemTime>,
+    /// A config pediu outro modelo/GPU/threads; recarrega quando ocioso.
+    pending_engine_reload: bool,
     phase: Phase,
     engine: Option<Arc<Engine>>,
     buffer: Vec<f32>,
     capture: Option<Capture>,
     ui: Arc<Mutex<UiState>>,
     osd: Option<Sender<OsdCommand>>,
+    /// Texto transcrito aguardando o OSD fechar para digitar na app
+    /// (o OSD visível segura o foco de teclado; wtype digitaria nele).
+    pending_insert: Option<String>,
     events_rx: Receiver<DaemonEvent>,
     events_tx: Sender<DaemonEvent>,
 }
@@ -64,21 +68,27 @@ pub fn run() -> Result<()> {
             let _ = ipc_tx.send(DaemonEvent::Ipc(cmd, reply));
         };
         if let Err(e) = ipc::serve(handler) {
+            // Ex.: outro daemon já ativo — sair em vez de ficar ocioso à toa.
             eprintln!("whisper: ipc: {e:#}");
+            std::process::exit(1);
         }
     });
     let mut daemon = Daemon {
         cfg,
+        cfg_mtime: config_mtime(),
+        pending_engine_reload: false,
         phase: Phase::Idle,
         engine: None,
         buffer: Vec::new(),
         capture: None,
         ui: Arc::new(Mutex::new(UiState::new(String::new()))),
         osd: None,
+        pending_insert: None,
         events_rx,
         events_tx,
     };
     daemon.loop_forever();
+    let _ = std::fs::remove_file(crate::config::socket_path());
     Ok(())
 }
 
@@ -88,19 +98,77 @@ fn lang_model(cfg: &Config) -> String {
 
 impl Daemon {
     fn loop_forever(&mut self) {
-        while let Ok(ev) = self.events_rx.recv() {
-            match ev {
-                DaemonEvent::Ipc(cmd, reply) => {
-                    let resp = self.handle_cmd(cmd);
-                    let _ = reply.send(resp);
-                }
-                DaemonEvent::Osd(ev) => self.handle_osd(ev),
-                DaemonEvent::Audio(chunk) => self.handle_audio(chunk),
-                DaemonEvent::AudioEnded(err) => self.handle_audio_ended(err),
-                DaemonEvent::Worker(out) => self.handle_worker(out),
-                DaemonEvent::EngineLoaded(res) => self.handle_engine_loaded(res),
+        loop {
+            self.reload_config_if_changed();
+            self.reload_engine_if_pending();
+            match self.events_rx.recv_timeout(Duration::from_secs(1)) {
+                Ok(ev) => match ev {
+                    DaemonEvent::Ipc(cmd, reply) => {
+                        if matches!(cmd, Cmd::Stop) {
+                            // Encerra sessão ativa (captura/OSD) e sai do loop.
+                            self.cancel_session();
+                            let _ = reply.send(Response {
+                                ok: true,
+                                state: "stopping".to_string(),
+                                error: None,
+                            });
+                            break;
+                        }
+                        let resp = self.handle_cmd(cmd);
+                        let _ = reply.send(resp);
+                    }
+                    DaemonEvent::Osd(ev) => self.handle_osd(ev),
+                    DaemonEvent::Audio(chunk) => self.handle_audio(chunk),
+                    DaemonEvent::AudioEnded(err) => self.handle_audio_ended(err),
+                    DaemonEvent::Worker(out) => self.handle_worker(out),
+                    DaemonEvent::EngineLoaded(res) => self.handle_engine_loaded(res),
+                },
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
             }
         }
+    }
+
+    /// Hot reload: se o arquivo de config mudou, troca a config na hora.
+    /// Campos usados por sessão (língua, pós-processamento, fonte, inserção)
+    /// valem já na próxima sessão; se o modelo/GPU/threads mudaram, agenda a
+    /// recarga do engine. Config inválida é ignorada (mantém a anterior).
+    fn reload_config_if_changed(&mut self) {
+        let mtime = config_mtime();
+        if mtime == self.cfg_mtime {
+            return;
+        }
+        self.cfg_mtime = mtime;
+        match Config::load() {
+            Ok(cfg) => {
+                let engine_changed = cfg.model != self.cfg.model
+                    || cfg.gpu_device != self.cfg.gpu_device
+                    || cfg.threads != self.cfg.threads;
+                self.cfg = cfg;
+                if engine_changed {
+                    self.pending_engine_reload = true;
+                }
+                eprintln!("whisper: config recarregada");
+            }
+            Err(e) => eprintln!("whisper: config inválida, mantendo a anterior: {e:#}"),
+        }
+    }
+
+    /// Recarrega o modelo em background quando a config mudou e o daemon está
+    /// ocioso; em caso de falha mantém o modelo atual (que continua valendo).
+    fn reload_engine_if_pending(&mut self) {
+        if !self.pending_engine_reload || self.phase != Phase::Idle || self.engine.is_none() {
+            return;
+        }
+        self.pending_engine_reload = false;
+        let cfg = self.cfg.clone();
+        let tx = self.events_tx.clone();
+        std::thread::spawn(move || {
+            let res = Engine::load(&cfg.model_path(), cfg.gpu_device, cfg.threads)
+                .map(Arc::new)
+                .map_err(|e| format!("{e:#}"));
+            let _ = tx.send(DaemonEvent::EngineLoaded(res));
+        });
     }
 
     fn handle_cmd(&mut self, cmd: Cmd) -> Response {
@@ -113,6 +181,7 @@ impl Daemon {
                 }
             }
             Cmd::Status => {}
+            Cmd::Stop => {} // interceptado no loop_forever antes de chegar aqui
         }
         Response { ok: true, state: self.state_str().to_string(), error: None }
     }
@@ -141,7 +210,19 @@ impl Daemon {
                 _ => {}
             },
             OsdEvent::Commit => self.commit(),
-            OsdEvent::Cancel | OsdEvent::Closed => self.cancel_session(),
+            OsdEvent::Cancel => self.cancel_session(),
+            OsdEvent::Closed => {
+                if let Some(text) = self.pending_insert.take() {
+                    // OSD fechado: o foco voltou à app, agora digita.
+                    if let Err(e) = insert::insert(&text, self.cfg.insert_mode) {
+                        // Em modo both o texto já está no clipboard.
+                        eprintln!("whisper: inserção falhou (texto no clipboard): {e}");
+                    }
+                    self.finish_session(None);
+                } else {
+                    self.cancel_session();
+                }
+            }
         }
     }
 
@@ -173,18 +254,17 @@ impl Daemon {
 
     fn handle_worker(&mut self, out: WorkerOutcome) {
         match out {
-            WorkerOutcome::Transcribed { text, inserted } => {
+            WorkerOutcome::Transcribed { text } => {
                 if text.is_empty() {
                     self.finish_session(Some("nada detectado".to_string()));
                     return;
                 }
-                let status = match inserted {
-                    Ok(()) => format!("✓  {text}"),
-                    Err(e) => format!("{text}   ⚠ {e}"),
-                };
-                self.set_ui(UiPhase::Transcribing, Some(status));
+                self.set_ui(UiPhase::Transcribing, Some(format!("✓  {text}")));
                 std::thread::sleep(Duration::from_millis(1600));
-                self.finish_session(None);
+                // Fecha o OSD ANTES de digitar: enquanto visível ele segura o
+                // foco de teclado e o wtype digitaria nele, não na app.
+                self.pending_insert = Some(text);
+                self.close_osd();
             }
             WorkerOutcome::Failed(msg) => {
                 self.set_ui(UiPhase::Error, Some(msg));
@@ -202,6 +282,9 @@ impl Daemon {
                     self.phase = Phase::Recording;
                     self.set_ui(UiPhase::Recording, None);
                     self.start_capture();
+                } else if self.phase == Phase::Idle {
+                    // Troca de modelo em background (hot reload da config).
+                    eprintln!("whisper: modelo recarregado");
                 }
             }
             Err(err) => {
@@ -209,6 +292,8 @@ impl Daemon {
                     self.set_ui(UiPhase::Error, Some(format!("modelo indisponível: {err}")));
                     std::thread::sleep(Duration::from_millis(2500));
                     self.cancel_session();
+                } else if self.phase == Phase::Idle {
+                    eprintln!("whisper: falha ao recarregar modelo, mantendo o atual: {err}");
                 }
             }
         }
@@ -228,9 +313,12 @@ impl Daemon {
             }
         });
         std::thread::spawn(move || {
-            if let Err(e) = crate::osd::run(ui, osd_ev_tx, osd_rx) {
+            if let Err(e) = crate::osd::run(ui, osd_ev_tx.clone(), osd_rx) {
                 eprintln!("whisper: osd: {e:#}");
             }
+            // OSD saiu (Close recebido ou erro): superfície destruída e foco
+            // de teclado já voltou à app — sinal seguro para digitar.
+            let _ = osd_ev_tx.send(OsdEvent::Closed);
         });
         self.osd = Some(osd_tx);
         self.buffer.clear();
@@ -336,6 +424,7 @@ impl Daemon {
     fn cancel_session(&mut self) {
         self.stop_capture();
         self.close_osd();
+        self.pending_insert = None; // Esc/toggle descarta a inserção pendente
         self.phase = Phase::Idle;
     }
 
@@ -357,7 +446,7 @@ fn transcribe_worker(engine: &Engine, mut samples: Vec<f32>, cfg: &Config) -> Wo
         samples = postprocess::trim_silence(&samples, audio::SAMPLE_RATE, 0.01, 500, 300);
     }
     if samples.is_empty() {
-        return WorkerOutcome::Transcribed { text: String::new(), inserted: Ok(()) };
+        return WorkerOutcome::Transcribed { text: String::new() };
     }
     let raw = match engine.transcribe(&samples, cfg.language.whisper_code()) {
         Ok(text) => text,
@@ -370,6 +459,7 @@ fn transcribe_worker(engine: &Engine, mut samples: Vec<f32>, cfg: &Config) -> Wo
     if cfg.punctuation {
         text = postprocess::fix_punctuation(&text, cfg.final_period);
     }
-    let inserted = insert::insert(&text, cfg.insert_mode).map_err(|e| format!("{e}"));
-    WorkerOutcome::Transcribed { text, inserted }
+    // A inserção (wtype) fica com o daemon, DEPOIS que o OSD fechar: com o
+    // OSD visível o foco de teclado é dele e as teclas não chegariam à app.
+    WorkerOutcome::Transcribed { text }
 }

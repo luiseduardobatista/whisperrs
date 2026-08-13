@@ -116,6 +116,22 @@ pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
 
+/// Última modificação do arquivo de config; `None` se o arquivo não existe
+/// (usado pelo hot reload do daemon para detectar mudanças).
+pub fn config_mtime() -> Option<std::time::SystemTime> {
+    std::fs::metadata(config_path()).and_then(|m| m.modified()).ok()
+}
+
+/// Diretório de estado: $XDG_STATE_HOME/whisper ou ~/.local/state/whisper.
+pub fn state_dir() -> PathBuf {
+    xdg("XDG_STATE_HOME", ".local/state").join("whisper")
+}
+
+/// Log do daemon em background (`whisper start`).
+pub fn log_path() -> PathBuf {
+    state_dir().join("daemon.log")
+}
+
 pub fn socket_path() -> PathBuf {
     xdg("XDG_RUNTIME_DIR", "/tmp").join("whisper.sock")
 }

@@ -39,6 +39,7 @@ use smithay_client_toolkit::{
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Transform};
 use wayland_client::globals::registry_queue_init;
 use wayland_client::protocol::{wl_keyboard, wl_output, wl_seat, wl_shm, wl_surface};
+use wayland_client::backend::WaylandError;
 use wayland_client::{Connection, QueueHandle};
 
 /// Dimensões lógicas do cartão (escaladas pela saída na renderização).
@@ -194,6 +195,20 @@ pub fn run(
     };
 
     loop {
+        // Lê eventos do socket (não bloqueante) para que configure, teclas e
+        // frame callbacks cheguem; `dispatch_pending` só despacha o que já
+        // foi lido da fila.
+        if let Some(guard) = conn.prepare_read() {
+            match guard.read() {
+                Ok(_) => {}
+                Err(WaylandError::Io(e))
+                    if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) => {
+                    eprintln!("whisper: leitura wayland: {e}");
+                    break;
+                }
+            }
+        }
         let _ = event_queue.dispatch_pending(&mut app);
         if matches!(app.commands_rx.try_recv(), Ok(OsdCommand::Close)) {
             break;
@@ -204,6 +219,9 @@ pub fn run(
         let _ = conn.flush();
         std::thread::sleep(Duration::from_millis(8));
     }
+    // Flush final: garante que os destroys das superfícies (drop do `app`)
+    // cheguem ao compositor antes de o daemon digitar na app focada.
+    let _ = conn.flush();
     Ok(())
 }
 
