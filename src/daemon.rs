@@ -126,6 +126,7 @@ impl Daemon {
                                 ok: true,
                                 state: "stopping".to_string(),
                                 error: None,
+                                exe: None,
                             });
                             break;
                         }
@@ -198,7 +199,21 @@ impl Daemon {
             Cmd::Status => {}
             Cmd::Stop => {} // interceptado no loop_forever antes de chegar aqui
         }
-        Response { ok: true, state: self.state_str().to_string(), error: None }
+        let mut resp = Response {
+            ok: true,
+            state: self.state_str().to_string(),
+            error: None,
+            exe: None,
+        };
+        if matches!(cmd, Cmd::Status) {
+            // O CLI compara com o próprio binário: daemon de outra origem
+            // (ex.: build de dev sem o wrapper do flake) é reiniciado no
+            // próximo `start`.
+            resp.exe = std::env::current_exe()
+                .ok()
+                .map(|p| p.display().to_string());
+        }
+        resp
     }
 
     fn state_str(&self) -> &'static str {
@@ -274,11 +289,9 @@ impl Daemon {
                     self.finish_session(Some("nada detectado".to_string()));
                     return;
                 }
-                self.set_ui(UiPhase::Transcribing, Some(format!("✓  {text}")));
-                std::thread::sleep(Duration::from_millis(1600));
-                // Fecha o OSD ANTES de digitar: enquanto visível ele segura o
-                // foco de teclado e o wtype digitaria nele, não na app.
                 self.pending_insert = Some(text);
+                // Sem preview do texto: fecha o OSD assim que a transcrição
+                // termina e digita direto na app focada (via evento Closed).
                 self.close_osd();
             }
             WorkerOutcome::Failed(msg) => {

@@ -61,7 +61,9 @@ O daemon é um loop de eventos sem async: tudo é `std::thread` + canais
 
 - Socket: `$XDG_RUNTIME_DIR/whisper.sock`, JSON por linha.
 - Request: `{ "cmd": "toggle" | "status" | "stop" }`.
-- Response: `{ "ok": bool, "state": str, "error": str|null }`.
+- Response: `{ "ok": bool, "state": str, "error": str|null, "exe": str|null }`
+  — `exe` (só em `status`) é o caminho do binário do daemon; ausente em
+  daemons de versões antigas.
 - Socket órfão é removido na subida; um segundo daemon sai com erro (exit 1)
   em vez de ficar ocioso.
 
@@ -80,8 +82,8 @@ Fluxo de uma sessão:
    buffer + nível RMS para a waveform.
 3. `Enter` → `commit`: para a captura e manda o buffer para a thread worker
    (trim_silence → whisper → remove_fillers → fix_punctuation).
-4. `handle_worker` mostra "✓ texto" por 1,6 s, agenda `pending_insert` e
-   fecha o OSD.
+4. `handle_worker` agenda `pending_insert` e fecha o OSD imediatamente —
+   sem preview do texto: ele aparece direto na app focada.
 5. Evento `Closed` (emitido pela thread do OSD ao sair, após flush do
    destroy) → **só então** `insert::insert` digita na app focada → `Idle`.
 6. `Esc` → `cancel_session`: mata captura, fecha OSD, descarta pendências.
@@ -137,6 +139,8 @@ cargo test --release transcribe_jfk -- --ignored
   erros de engine, falhas de inserção).
 - Falha de inserção não é visível no OSD (já fechado): olhe o
   `daemon.log` ("inserção falhou (texto no clipboard)").
+- `whisper status` mostra também o binário do daemon (`daemon: ...`) — se
+  ele não for o esperado, `whisper start` já reinicia com o binário atual.
 - Se `wtype` estiver ausente do PATH, `whisper start` avisa no console e o
   daemon registra o aviso no log na subida — instale o pacote e reinicie o
   daemon.
