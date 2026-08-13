@@ -8,8 +8,14 @@
   };
 
   nixConfig = {
-    extra-trusted-public-keys = "devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=";
-    extra-substituters = "https://devenv.cachix.org";
+    extra-trusted-public-keys = [
+      "devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw="
+      "luiseduardobatista.cachix.org-1:n72Rp2wotqSy5rQ0un3RnBbWiptb9zVfGAqU8f1xqL0="
+    ];
+    extra-substituters = [
+      "https://devenv.cachix.org"
+      "https://luiseduardobatista.cachix.org"
+    ];
   };
 
   outputs = { self, nixpkgs, devenv, ... }@inputs: let
