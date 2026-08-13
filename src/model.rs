@@ -236,7 +236,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalogo_contem_modelos_esperados() {
+    fn catalog_contains_expected_models() {
         for name in ["tiny", "base", "small", "medium", "large-v3", "turbo"] {
             assert!(find(name).is_some(), "faltando {name}");
         }

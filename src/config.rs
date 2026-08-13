@@ -151,7 +151,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_arquivo_de_config_com_defaults() {
+    fn parse_config_file_with_defaults() {
         let cfg: Config = toml::from_str("").unwrap();
         assert_eq!(cfg.language, Language::Pt);
         assert_eq!(cfg.model, "turbo");
@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn lingua_para_codigo_whisper() {
+    fn language_to_whisper_code() {
         assert_eq!(Language::Pt.whisper_code(), Some("pt"));
         assert_eq!(Language::En.whisper_code(), Some("en"));
         assert_eq!(Language::Auto.whisper_code(), None);

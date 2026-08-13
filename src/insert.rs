@@ -85,7 +85,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn modo_sem_acao_nao_falha() {
+    fn mode_without_action_does_not_fail() {
         // Clipboard/Type exigem ferramentas do sistema; o modo de teste
         // garante apenas que a lógica de acumulação de erros funciona.
         let r = insert("x", InsertMode::Clipboard);
@@ -93,7 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn detecta_wtype_no_path() {
+    fn detects_wtype_in_path() {
         let dir = std::env::temp_dir().join(format!("whisper-wtype-{}", std::process::id()));
         let bin = dir.join("wtype");
         std::fs::create_dir_all(&dir).unwrap();

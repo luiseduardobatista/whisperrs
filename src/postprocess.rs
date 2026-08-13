@@ -134,19 +134,19 @@ mod tests {
     }
 
     #[test]
-    fn rms_de_silencio_e_zero() {
+    fn rms_of_silence_is_zero() {
         assert_eq!(rms(&[0.0; 100]), 0.0);
     }
 
     #[test]
-    fn rms_de_onda_senoidal() {
+    fn rms_of_sine_wave() {
         let s = sine(440.0, 16_000, 0.1, 0.5);
         let r = rms(&s);
         assert!((r - 0.5 / 2f32.sqrt()).abs() < 0.02, "rms = {r}");
     }
 
     #[test]
-    fn trim_remove_silencio_das_bordas() {
+    fn trim_removes_edge_silence() {
         let mut s = vec![0.0; 16_000]; // 1s de silêncio
         s.extend(sine(440.0, 16_000, 0.5, 0.3));
         s.extend(vec![0.0; 8_000]); // 0.5s de silêncio
@@ -164,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn trim_colapsa_pausa_interna_longa() {
+    fn trim_collapses_long_internal_pause() {
         let mut s = sine(440.0, 16_000, 0.3, 0.3);
         s.extend(vec![0.0; 16_000]); // 1s de pausa
         s.extend(sine(440.0, 16_000, 0.3, 0.3));
@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn trim_tudo_silencio_retorna_vazio() {
+    fn trim_all_silence_returns_empty() {
         assert!(trim_silence(&vec![0.0; 16_000], 16_000, 0.01, 500, 300).is_empty());
     }
 
@@ -186,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_fillers_nao_remove_palavras_reais() {
+    fn remove_fillers_keeps_real_words() {
         // "tipo" e "é" são palavras reais em pt e não devem sumir
         assert_eq!(remove_fillers("tipo é um teste", Language::Pt), "tipo é um teste");
         // "um" não é filler em inglês? é artigo alemão — em en, "um" é filler legítimo; aqui teste de en:
@@ -194,12 +194,12 @@ mod tests {
     }
 
     #[test]
-    fn remove_fillers_insensivel_a_caixa_e_pontuacao() {
+    fn remove_fillers_case_and_punctuation_insensitive() {
         assert_eq!(remove_fillers("Hmm, ahn!", Language::Pt), "");
     }
 
     #[test]
-    fn pontuacao_colapsa_espacos_e_capitaliza() {
+    fn punctuation_collapses_spaces_and_capitalizes() {
         assert_eq!(
             fix_punctuation("olá   mundo .  como vai ?", true),
             "Olá mundo. Como vai?"
@@ -207,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn pontuacao_periodo_final() {
+    fn punctuation_final_period() {
         assert_eq!(fix_punctuation("isto é um teste", true), "Isto é um teste.");
         assert_eq!(fix_punctuation("isto é um teste", false), "Isto é um teste");
         assert_eq!(fix_punctuation("já tem ponto.", true), "Já tem ponto.");
@@ -216,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn pontuacao_nao_capitaliza_mid_sentence() {
+    fn punctuation_does_not_capitalize_mid_sentence() {
         assert_eq!(fix_punctuation("a b c", true), "A b c.");
     }
 }

@@ -762,13 +762,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fonte_embutida_carrega() {
+    fn embedded_font_loads() {
         let f = font();
         assert!(measure(f, "abc", 13.0) > 0.0);
     }
 
     #[test]
-    fn draw_card_nao_panica() {
+    fn draw_card_does_not_panic() {
         let mut pix = Pixmap::new(800, 180).unwrap();
         let mut ui = UiState::new("pt · turbo".to_string());
         ui.phase = Phase::Recording;
@@ -782,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn medida_de_texto_é_positiva_e_monotona() {
+    fn text_measure_is_positive_and_monotonic() {
         let f = font();
         let m1 = measure(f, "a", 13.0);
         let m2 = measure(f, "aa", 13.0);
@@ -791,7 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn aviso_do_rodape_cabe_no_cartao() {
+    fn footer_warning_fits_in_card() {
         // O aviso de wtype ausente (e as dicas padrão) não podem estourar a
         // largura do cartão; draw_text truncaria com "…", perdendo info.
         let f = font();

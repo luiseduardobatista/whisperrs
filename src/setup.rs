@@ -1,7 +1,7 @@
 //! Wizard de configuração: língua, modelo e download automático.
 use crate::config::{Config, InsertMode, Language};
 use crate::insert;
-use crate::model::{self, ModelSpec};
+use crate::model;
 use anyhow::{bail, Result};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::Select;
@@ -82,12 +82,4 @@ pub fn run(lang_flag: Option<String>, model_flag: Option<String>) -> Result<()> 
         println!("  Depois de instalar, reinicie o daemon (whisper stop && whisper start).");
     }
     Ok(())
-}
-
-#[allow(dead_code)]
-fn _model_items() -> Vec<String> {
-    model::MODELS
-        .iter()
-        .map(|m: &ModelSpec| format!("{} — {} MB", m.name, m.size_mb))
-        .collect()
 }

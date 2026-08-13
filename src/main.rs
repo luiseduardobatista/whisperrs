@@ -77,18 +77,15 @@ fn start() -> Result<()> {
     let exe = std::env::current_exe().context("localizando o próprio executável")?;
     // Um daemon de outra origem (ex.: build de dev sem o wrapper do flake)
     // não tem wtype no PATH — a digitação quebraria. Diferente → reinicia.
-    match ipc::request(ipc::Cmd::Status) {
-        Ok(resp) => {
-            let mesmo = resp.exe.as_deref() == exe.to_str();
-            if mesmo {
-                println!("whisper já está rodando");
-                return Ok(());
-            }
-            println!("daemon de outra origem — reiniciando com este binário");
-            let _ = ipc::request(ipc::Cmd::Stop);
-            wait_daemon_exit()?;
+    if let Ok(resp) = ipc::request(ipc::Cmd::Status) {
+        let same = resp.exe.as_deref() == exe.to_str();
+        if same {
+            println!("whisper já está rodando");
+            return Ok(());
         }
-        Err(_) => {} // sem daemon: segue para subir
+        println!("daemon de outra origem — reiniciando com este binário");
+        let _ = ipc::request(ipc::Cmd::Stop);
+        wait_daemon_exit()?;
     }
     let log = crate::config::log_path();
     if let Some(parent) = log.parent() {

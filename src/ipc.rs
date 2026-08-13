@@ -86,7 +86,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resposta_de_daemon_antigo_sem_exe() {
+    fn old_daemon_response_without_exe() {
         // Compatibilidade: daemon de versão anterior não envia `exe` — o
         // campo deve desserializar como None (e o CLI reinicia o daemon).
         let resp: Response = serde_json::from_str(r#"{"ok":true,"state":"idle"}"#).unwrap();
@@ -94,7 +94,7 @@ mod tests {
     }
 
     #[test]
-    fn exe_serializa_e_roundtrip() {
+    fn exe_serializes_and_roundtrips() {
         let resp = Response {
             ok: true,
             state: "idle".to_string(),
