@@ -1,10 +1,6 @@
 { pkgs, lib, config, inputs, ... }:
 
 {
-  # Empurra builds do devenv (inclusive `nix build .#default` dentro do shell)
-  # para o cachix — o CI de release usa isso; máquinas consomem via flake.
-  cachix.push = "luiseduardobatista";
-
   # https://devenv.sh/packages/
   packages = with pkgs; [
     cargo rustc
