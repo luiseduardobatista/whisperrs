@@ -118,9 +118,9 @@ pega automaticamente; se ela afetar o engine, inclua-a na comparação de
 
 - `release: types: [published]` (ou `workflow_dispatch` para testar na mão)
   dispara `.github/workflows/release.yml`: builda `nix build .#default`
-  dentro do shell do devenv, que empurra os store paths para o cachix
-  (`luiseduardobatista.cachix.org`, via `cachix.push` no `devenv.nix`;
-  requer o secret `CACHIX_AUTH_TOKEN` no repo).
+  dentro do shell do devenv; o cachix-action (com o secret
+  `CACHIX_AUTH_TOKEN`) empurra os store paths para
+  `luiseduardobatista.cachix.org`.
 - Máquinas NixOS consomem o cache pelo `nixConfig` do flake
   (extra-substituters + public key) ou via `nix.settings` no
   `configuration.nix` — baixam o binário pronto, sem rebuild.
