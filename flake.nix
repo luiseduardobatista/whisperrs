@@ -3,30 +3,32 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    devenv.url = "github:cachix/devenv";
+    devenv.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs }: let
+  nixConfig = {
+    extra-trusted-public-keys = "devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=";
+    extra-substituters = "https://devenv.cachix.org";
+  };
+
+  outputs = { self, nixpkgs, devenv, ... }@inputs: let
     systems = [ "x86_64-linux" ];
     forAllSystems = nixpkgs.lib.genAttrs systems;
+    pkgsFor = system: nixpkgs.legacyPackages.${system};
   in {
-    devShells = forAllSystems (system: let
-      pkgs = nixpkgs.legacyPackages.${system};
-    in {
-      default = pkgs.mkShell {
-        packages = with pkgs; [
-          cargo rustc
-          cmake clang pkg-config glslang libclang shaderc
-          libxkbcommon vulkan-headers vulkan-loader wayland
-        ];
-        shellHook = ''
-          export LIBCLANG_PATH="${pkgs.libclang.lib}/lib"
-          export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.libxkbcommon pkgs.vulkan-loader pkgs.wayland ]}:$LD_LIBRARY_PATH"
-        '';
+    # DevShell compartilhada com o CLI do devenv: config em ./devenv.nix.
+    # Uso: `nix develop --no-pure-eval` ou `devenv shell`.
+    devShells = forAllSystems (system: {
+      default = devenv.lib.mkShell {
+        inherit inputs;
+        pkgs = pkgsFor system;
+        modules = [ ./devenv.nix ];
       };
     });
 
     packages = forAllSystems (system: let
-      pkgs = nixpkgs.legacyPackages.${system};
+      pkgs = pkgsFor system;
     in {
       default = pkgs.rustPlatform.buildRustPackage {
         pname = "whisper";
