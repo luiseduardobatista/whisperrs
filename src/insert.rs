@@ -33,6 +33,7 @@ fn executable_file(path: &Path) -> bool {
 /// (ex.: wtype ausente → o texto continua no clipboard).
 pub fn insert(text: &str, mode: InsertMode) -> Result<(), String> {
     let mut failures = Vec::new();
+    let mut clipboard_ok = false;
 
     if matches!(mode, InsertMode::Type | InsertMode::Both) {
         let status = Command::new("wtype")
@@ -61,18 +62,29 @@ pub fn insert(text: &str, mode: InsertMode) -> Result<(), String> {
             Ok(c) => c,
             Err(e) => {
                 failures.push(format!("wl-copy: {e}"));
-                return Err(failures.join("; "));
+                return finish(&failures);
             }
         };
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(text.as_bytes());
         }
         match child.wait() {
-            Ok(s) if s.success() => {}
+            Ok(s) if s.success() => clipboard_ok = true,
             _ => failures.push("wl-copy falhou".to_string()),
         }
     }
 
+    // Em modo both a digitação pode falhar com a cópia funcionando: o erro
+    // precisa dizer que o texto está no clipboard (senão parece perdido).
+    if clipboard_ok && !failures.is_empty() {
+        failures.push("texto no clipboard — dá para colar manualmente".to_string());
+    }
+    finish(&failures)
+}
+
+/// Converte as falhas acumuladas em `Err` (todas, separadas por "; ");
+/// nenhuma falha → `Ok`.
+fn finish(failures: &[String]) -> Result<(), String> {
     if failures.is_empty() {
         Ok(())
     } else {
@@ -85,38 +97,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mode_without_action_does_not_fail() {
-        // Clipboard/Type exigem ferramentas do sistema; o modo de teste
-        // garante apenas que a lógica de acumulação de erros funciona.
-        let r = insert("x", InsertMode::Clipboard);
-        assert!(r.is_ok() || r.is_err()); // depende do ambiente — sem pânico
+    fn finish_returns_ok_when_no_failures() {
+        assert_eq!(finish(&[]), Ok(()));
     }
 
     #[test]
-    fn detects_wtype_in_path() {
-        let dir = std::env::temp_dir().join(format!("whisper-wtype-{}", std::process::id()));
-        let bin = dir.join("wtype");
+    fn finish_joins_all_failures() {
+        let failures = vec!["wtype: x".to_string(), "wl-copy: y".to_string()];
+        assert_eq!(finish(&failures), Err("wtype: x; wl-copy: y".to_string()));
+    }
+
+    /// Diretório temporário único por teste (evita colisão entre testes
+    /// paralelos rodando no mesmo PID).
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("whisper-wtype-{}-{tag}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Diretório com um `wtype` falso com as permissões dadas.
+    fn fake_wtype_dir(tag: &str, mode: u32) -> PathBuf {
+        let dir = temp_dir(tag);
+        let bin = dir.join("wtype");
         std::fs::write(&bin, "#!/bin/sh\n").unwrap();
-
-        // Executável → encontrado.
         let mut perms = std::fs::metadata(&bin).unwrap().permissions();
-        perms.set_mode(0o755);
+        perms.set_mode(mode);
         std::fs::set_permissions(&bin, perms).unwrap();
+        dir
+    }
+
+    #[test]
+    fn finds_executable_wtype_in_path() {
+        let dir = fake_wtype_dir("exec", 0o755);
         assert!(has_wtype_in(std::iter::once(dir.clone())));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
-        // Sem permissão de execução → ignorado.
-        let mut perms = std::fs::metadata(&bin).unwrap().permissions();
-        perms.set_mode(0o644);
-        std::fs::set_permissions(&bin, perms).unwrap();
+    #[test]
+    fn ignores_non_executable_wtype() {
+        let dir = fake_wtype_dir("noexec", 0o644);
         assert!(!has_wtype_in(std::iter::once(dir.clone())));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
-        // Diretório vazio → ignorado.
-        let empty = std::env::temp_dir().join(format!("whisper-wtype-empty-{}", std::process::id()));
-        std::fs::create_dir_all(&empty).unwrap();
-        assert!(!has_wtype_in(std::iter::once(empty.clone())));
-
-        let _ = std::fs::remove_dir_all(&dir);
-        let _ = std::fs::remove_dir_all(&empty);
+    #[test]
+    fn ignores_dir_without_wtype() {
+        let dir = temp_dir("empty");
+        assert!(!has_wtype_in(std::iter::once(dir.clone())));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

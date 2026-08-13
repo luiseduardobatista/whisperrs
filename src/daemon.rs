@@ -123,7 +123,6 @@ impl Daemon {
                             // Encerra sessão ativa (captura/OSD) e sai do loop.
                             self.cancel_session();
                             let _ = reply.send(Response {
-                                ok: true,
                                 state: "stopping".to_string(),
                                 error: None,
                                 exe: None,
@@ -200,7 +199,6 @@ impl Daemon {
             Cmd::Stop => {} // interceptado no loop_forever antes de chegar aqui
         }
         let mut resp = Response {
-            ok: true,
             state: self.state_str().to_string(),
             error: None,
             exe: None,
@@ -245,8 +243,10 @@ impl Daemon {
                 if let Some(text) = self.pending_insert.take() {
                     // OSD fechado: o foco voltou à app, agora digita.
                     if let Err(e) = insert::insert(&text, self.cfg.insert_mode) {
-                        // Em modo both o texto já está no clipboard.
-                        eprintln!("whisper: inserção falhou (texto no clipboard): {e}");
+                        // O insert detalha a falha e avisa quando o texto
+                        // sobrou no clipboard (modo both); a sessão encerra
+                        // do mesmo jeito.
+                        eprintln!("whisper: inserção falhou: {e}");
                     }
                     self.finish_session(None);
                 } else {

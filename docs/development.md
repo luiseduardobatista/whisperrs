@@ -61,9 +61,10 @@ O daemon é um loop de eventos sem async: tudo é `std::thread` + canais
 
 - Socket: `$XDG_RUNTIME_DIR/whisper.sock`, JSON por linha.
 - Request: `{ "cmd": "toggle" | "status" | "stop" }`.
-- Response: `{ "ok": bool, "state": str, "error": str|null, "exe": str|null }`
+- Response: `{ "state": str, "error": str|null, "exe": str|null }`
   — `exe` (só em `status`) é o caminho do binário do daemon; ausente em
-  daemons de versões antigas.
+  daemons de versões antigas (campos desconhecidos do lado antigo são
+  ignorados na desserialização).
 - Socket órfão é removido na subida; um segundo daemon sai com erro (exit 1)
   em vez de ficar ocioso.
 

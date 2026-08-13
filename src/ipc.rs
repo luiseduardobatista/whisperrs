@@ -20,7 +20,6 @@ pub struct Request {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Response {
-    pub ok: bool,
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -62,7 +61,11 @@ where
         let Ok(stream) = conn else { continue };
         let handler = std::sync::Arc::clone(&handler);
         std::thread::spawn(move || {
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut stream = stream;
+            let Ok(clone) = stream.try_clone() else {
+                return;
+            };
+            let mut reader = BufReader::new(clone);
             let mut line = String::new();
             if reader.read_line(&mut line).is_err() {
                 return;
@@ -73,8 +76,10 @@ where
             let (reply_tx, reply_rx) = std::sync::mpsc::channel();
             handler(req.cmd, reply_tx);
             if let Ok(resp) = reply_rx.recv() {
-                let mut stream = stream;
-                let _ = writeln!(stream, "{}", serde_json::to_string(&resp).unwrap());
+                let Ok(json) = serde_json::to_string(&resp) else {
+                    return;
+                };
+                let _ = writeln!(stream, "{json}");
             }
         });
     }
@@ -96,7 +101,6 @@ mod tests {
     #[test]
     fn exe_serializes_and_roundtrips() {
         let resp = Response {
-            ok: true,
             state: "idle".to_string(),
             error: None,
             exe: Some("/nix/store/x-whisper/bin/.whisper-wrapped".to_string()),
