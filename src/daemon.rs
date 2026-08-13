@@ -289,11 +289,9 @@ impl Daemon {
                     self.finish_session(Some("nada detectado".to_string()));
                     return;
                 }
-                self.set_ui(UiPhase::Transcribing, Some(format!("✓  {text}")));
-                std::thread::sleep(Duration::from_millis(1600));
-                // Fecha o OSD ANTES de digitar: enquanto visível ele segura o
-                // foco de teclado e o wtype digitaria nele, não na app.
                 self.pending_insert = Some(text);
+                // Sem preview do texto: fecha o OSD assim que a transcrição
+                // termina e digita direto na app focada (via evento Closed).
                 self.close_osd();
             }
             WorkerOutcome::Failed(msg) => {

@@ -82,8 +82,8 @@ Fluxo de uma sessão:
    buffer + nível RMS para a waveform.
 3. `Enter` → `commit`: para a captura e manda o buffer para a thread worker
    (trim_silence → whisper → remove_fillers → fix_punctuation).
-4. `handle_worker` mostra "✓ texto" por 1,6 s, agenda `pending_insert` e
-   fecha o OSD.
+4. `handle_worker` agenda `pending_insert` e fecha o OSD imediatamente —
+   sem preview do texto: ele aparece direto na app focada.
 5. Evento `Closed` (emitido pela thread do OSD ao sair, após flush do
    destroy) → **só então** `insert::insert` digita na app focada → `Idle`.
 6. `Esc` → `cancel_session`: mata captura, fecha OSD, descarta pendências.
