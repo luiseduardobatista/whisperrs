@@ -35,8 +35,19 @@
         version = "0.1.0";
         src = ./.;
         cargoLock.lockFile = ./Cargo.lock;
-        nativeBuildInputs = [ pkgs.cmake pkgs.clang pkgs.pkg-config pkgs.glslang pkgs.shaderc ];
-        buildInputs = [ pkgs.libxkbcommon pkgs.vulkan-loader ];
+        nativeBuildInputs = [
+          pkgs.cmake
+          pkgs.clang
+          pkgs.pkg-config
+          pkgs.glslang
+          pkgs.shaderc
+          pkgs.libclang
+          pkgs.makeWrapper
+        ];
+        buildInputs = [ pkgs.libxkbcommon pkgs.vulkan-loader pkgs.vulkan-headers ];
+        preConfigure = ''
+          export LIBCLANG_PATH="${pkgs.libclang.lib}/lib"
+        '';
         postInstall = ''
           wrapProgram $out/bin/whisper \
             --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath [ pkgs.libxkbcommon pkgs.vulkan-loader ]}"
