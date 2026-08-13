@@ -1,17 +1,11 @@
-//! Inserção do texto na app focada: wtype (digita) + wl-copy (clipboard).
-use crate::config::InsertMode;
-use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// Dica de instalação exibida quando o `wtype` está ausente do PATH.
 pub fn wtype_hint() -> &'static str {
     "instale o pacote wtype (NixOS: adicione pkgs.wtype ao environment.systemPackages; \
      Arch: pacman -S wtype; Debian/Ubuntu: apt install wtype)"
 }
 
-/// Verifica se `wtype` está disponível no PATH (sem executar nada).
 pub fn wtype_available() -> bool {
     match std::env::var_os("PATH") {
         Some(path) => has_wtype_in(std::env::split_paths(&path)),
@@ -29,8 +23,6 @@ fn executable_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Insere `text` conforme o modo. Erros são acumulados e reportados no final
-/// (ex.: wtype ausente → o texto continua no clipboard).
 pub fn insert(text: &str, mode: InsertMode) -> Result<(), String> {
     let mut failures = Vec::new();
     let mut clipboard_ok = false;
@@ -74,16 +66,12 @@ pub fn insert(text: &str, mode: InsertMode) -> Result<(), String> {
         }
     }
 
-    // Em modo both a digitação pode falhar com a cópia funcionando: o erro
-    // precisa dizer que o texto está no clipboard (senão parece perdido).
     if clipboard_ok && !failures.is_empty() {
         failures.push("texto no clipboard — dá para colar manualmente".to_string());
     }
     finish(&failures)
 }
 
-/// Converte as falhas acumuladas em `Err` (todas, separadas por "; ");
-/// nenhuma falha → `Ok`.
 fn finish(failures: &[String]) -> Result<(), String> {
     if failures.is_empty() {
         Ok(())
@@ -107,15 +95,12 @@ mod tests {
         assert_eq!(finish(&failures), Err("wtype: x; wl-copy: y".to_string()));
     }
 
-    /// Diretório temporário único por teste (evita colisão entre testes
-    /// paralelos rodando no mesmo PID).
     fn temp_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("whisper-wtype-{}-{tag}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
-    /// Diretório com um `wtype` falso com as permissões dadas.
     fn fake_wtype_dir(tag: &str, mode: u32) -> PathBuf {
         let dir = temp_dir(tag);
         let bin = dir.join("wtype");
