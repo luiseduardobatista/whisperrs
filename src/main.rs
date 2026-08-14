@@ -4,6 +4,7 @@ mod config;
 mod daemon;
 mod insert;
 mod ipc;
+mod llm;
 mod model;
 mod osd;
 mod osd_draw;
@@ -48,6 +49,8 @@ enum Command {
         lang: Option<String>,
         #[arg(long)]
         model: Option<String>,
+        #[arg(long = "ai-model")]
+        ai_model: Option<String>,
     },
 }
 
@@ -71,7 +74,11 @@ fn main() -> Result<()> {
             print_response(&resp);
             Ok(())
         }
-        Command::Setup { lang, model } => setup::run(lang, model),
+        Command::Setup {
+            lang,
+            model,
+            ai_model,
+        } => setup::run(lang, model, ai_model),
     }
 }
 

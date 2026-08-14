@@ -16,6 +16,13 @@ final_period = true    # garante ponto final
 gpu_device = 0
 threads = 4
 # source = "nome.do.no.pipewire"   # fonte de áudio explícita (pw-record --target)
+
+[ai]
+enabled = true                  # usa Qwen quando disponível
+model = "qwen3.5-0.8b"           # nome do catálogo ou caminho com '/'
+context_size = 2048
+gpu = true
+cleanup = true                  # pós-processa também sem o modo smart
 ```
 
 | Opção | Valores | Default | Efeito |
@@ -29,6 +36,11 @@ threads = 4
 | `gpu_device` | inteiro | `0` | índice do dispositivo Vulkan |
 | `threads` | inteiro | `4` | threads da transcrição |
 | `source` | nome de nó PipeWire | `null` | fonte de áudio explícita (`pw-record --target`) |
+| `ai.enabled` | booleano | `true` | habilita o pós-processamento Qwen quando modelo e `llama-server` existem |
+| `ai.model` | nome ou caminho | `qwen3.5-0.8b` | modelo GGUF; nomes usam o catálogo LLM |
+| `ai.context_size` | inteiro | `2048` | contexto passado ao `llama-server` |
+| `ai.gpu` | booleano | `true` | tenta carregar as camadas na GPU e cai para CPU se necessário |
+| `ai.cleanup` | booleano | `true` | usa Qwen no cleanup normal; o modo smart tenta Qwen sempre que habilitado |
 
 ## Detecção de voz (VAD)
 
@@ -77,9 +89,12 @@ Multilíngues, oficiais do whisper.cpp (HuggingFace), baixados para
 | `large-v3` | `ggml-large-v3.bin` | 3,1 GB |
 | `turbo` | `ggml-large-v3-turbo.bin` | 1,6 GB |
 
-O `whisper setup` baixa o modelo escolhido **e** o modelo VAD (fixo). O modelo
-de transcrição é carregado na primeira sessão de ditado e fica residente em
-VRAM até o daemon parar. Os downloads usam **conexões paralelas** (HTTP Range,
+O `whisper setup` baixa o modelo escolhido **e** o modelo VAD (fixo). Com
+`--ai-model qwen3.5-0.8b` (ou respondendo "sim" à pergunta do wizard), baixa
+também o GGUF do Qwen; o daemon nunca baixa
+modelos. O modelo de transcrição é carregado na primeira sessão de ditado e
+fica residente em VRAM até o daemon parar. Os downloads usam **conexões
+paralelas** (HTTP Range,
 até 16, como o aria2c `-x 16`) para aproveitar a banda da internet; se o
 servidor não suportar Range, cai para uma única conexão. Uma falha remove o
 arquivo parcial.
@@ -94,6 +109,8 @@ recarrega a config sem reiniciar:
   numa gravação em andamento, no momento do `Enter`.
 - **`model`/`gpu_device`/`threads`** recarregam o modelo em background quando
   o daemon está ocioso; em caso de falha, mantém o modelo atual.
+- **`[ai]`** vale na próxima sessão e mata o servidor LLM; não recarrega o
+  engine do whisper.
 - **Config inválida** (erro de TOML) é ignorada: o daemon mantém a anterior e
   loga o erro em `~/.local/state/whisper/daemon.log`.
 

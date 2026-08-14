@@ -8,7 +8,8 @@ Guia rápido para agentes de IA neste repositório. Referência completa
 
 Ditado por voz em Rust para Linux/Wayland: `pw-record` captura, whisper.cpp
 (Vulkan, sem nuvem) transcreve, OSD em wlr-layer-shell mostra o estado e
-`wtype` + `wl-copy` inserem o texto na app focada.
+`wtype` + `wl-copy` inserem o texto na app focada. O pós-processamento com
+`llama-server` (Qwen) é opcional e fica no PATH em runtime.
 
 ## Comandos
 
@@ -53,3 +54,13 @@ Log do daemon: `~/.local/state/whisper/daemon.log`. Config:
 6. **Sem async runtime** — threads + canais, como o resto do código.
 7. **pt-BR** em comentários, mensagens de erro e docs.
 8. **Caminhos XDG** sempre pelos helpers de `config.rs`.
+9. **Fallback de pós-processamento**: com `[ai]` ausente/desabilitado, sem
+   `llama-server` ou sem o modelo, o texto final é idêntico ao pipeline Rust
+   atual (`remove_fillers` + `fix_punctuation`).
+
+## Agentes delegados (worker, reviewer, Explore etc.)
+
+- **Nunca passe `max_turns` ao spawnar subagentes** (tool `Agent` ou
+  frontmatter). Omitir usa o default (ilimitado); limites baixos (ex.: 20–50
+  turns) fazem subagentes legítimos atingirem o soft-limit ("You have reached
+  your turn limit") e encerrarem com trabalho incompleto.

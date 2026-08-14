@@ -43,6 +43,28 @@ pub enum InsertMode {
     Both,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AiConfig {
+    pub enabled: bool,
+    pub model: String,
+    pub context_size: u32,
+    pub gpu: bool,
+    pub cleanup: bool,
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        AiConfig {
+            enabled: true,
+            model: "qwen3.5-0.8b".to_string(),
+            context_size: 2048,
+            gpu: true,
+            cleanup: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -56,6 +78,8 @@ pub struct Config {
     pub threads: u32,
     /// Nome do nó de áudio do PipeWire (pw-record --target); `None` = fonte padrão.
     pub source: Option<String>,
+    #[serde(default)]
+    pub ai: AiConfig,
 }
 
 impl Default for Config {
@@ -70,6 +94,7 @@ impl Default for Config {
             gpu_device: 0,
             threads: 4,
             source: None,
+            ai: AiConfig::default(),
         }
     }
 }
@@ -97,6 +122,18 @@ impl Config {
 
     pub fn model_path(&self) -> PathBuf {
         crate::model::models_dir().join(crate::model::file_name(&self.model).unwrap_or(""))
+    }
+
+    /// Caminho do modelo LLM: nome do catálogo ou caminho absoluto; `None` se
+    /// o arquivo não existe (o daemon degrada para o fallback Rust).
+    pub fn ai_model_path(&self) -> Option<PathBuf> {
+        let path = if self.ai.model.contains('/') {
+            PathBuf::from(&self.ai.model)
+        } else {
+            let spec = crate::model::find_llm(&self.ai.model)?;
+            crate::model::models_dir().join(spec.file)
+        };
+        path.is_file().then_some(path)
     }
 }
 
@@ -153,6 +190,61 @@ mod tests {
         assert_eq!(cfg.model, "turbo");
         assert!(cfg.punctuation);
         assert_eq!(cfg.insert_mode, InsertMode::Both);
+        assert_eq!(cfg.ai, AiConfig::default());
+    }
+
+    #[test]
+    fn parse_complete_ai_config() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [ai]
+            enabled = false
+            model = "qwen3.5-0.8b"
+            context_size = 4096
+            gpu = false
+            cleanup = false
+            "#,
+        )
+        .unwrap();
+        assert!(!cfg.ai.enabled);
+        assert_eq!(cfg.ai.model, "qwen3.5-0.8b");
+        assert_eq!(cfg.ai.context_size, 4096);
+        assert!(!cfg.ai.gpu);
+        assert!(!cfg.ai.cleanup);
+    }
+
+    #[test]
+    fn ai_model_path_resolves_catalog_and_direct_paths() {
+        let catalog_path = crate::model::models_dir().join("Qwen_Qwen3.5-0.8B-Q5_K_M.gguf");
+        let catalog_existed = catalog_path.exists();
+        if !catalog_existed {
+            std::fs::create_dir_all(catalog_path.parent().unwrap()).unwrap();
+            std::fs::write(&catalog_path, b"teste").unwrap();
+        }
+        let cfg = Config::default();
+        assert_eq!(cfg.ai_model_path(), Some(catalog_path.clone()));
+        if !catalog_existed {
+            std::fs::remove_file(catalog_path).unwrap();
+        }
+
+        let mut invalid = cfg.clone();
+        invalid.ai.model = "modelo-inexistente".to_string();
+        assert_eq!(invalid.ai_model_path(), None);
+
+        let direct = std::env::temp_dir().join(format!(
+            "whisper-ai-model-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&direct, b"teste").unwrap();
+        let mut direct_cfg = cfg;
+        direct_cfg.ai.model = direct.display().to_string();
+        assert_eq!(direct_cfg.ai_model_path(), Some(direct.clone()));
+        std::fs::remove_file(&direct).unwrap();
+        assert_eq!(direct_cfg.ai_model_path(), None);
     }
 
     #[test]
