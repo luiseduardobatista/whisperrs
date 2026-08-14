@@ -171,6 +171,9 @@ fn measure(font: &FontArc, text: &str, size: f32) -> f32 {
 }
 
 /// Desenha texto simples, truncando com "…" se exceder `max_w`.
+// Parâmetros posicionais de desenho; agrupar num struct não simplifica
+// os ~10 call sites (lint clippy::too_many_arguments aceito de propósito).
+#[allow(clippy::too_many_arguments)]
 fn draw_text(
     pix: &mut PixmapMut<'_>,
     font: &FontArc,
@@ -285,11 +288,19 @@ mod tests {
 
     #[test]
     fn footer_warning_fits_in_card() {
-        // O aviso de wtype ausente (e as dicas padrão) não podem estourar a
-        // largura do cartão; draw_text truncaria com "…", perdendo info.
+        // Os avisos de wtype/VAD ausentes (e as dicas padrão) não podem
+        // estourar a largura do cartão; draw_text truncaria com "…", perdendo
+        // info. As strings devem bater com `compose_warning` (daemon.rs).
         let f = font();
-        let msg = "wtype ausente — a digitação na app não vai funcionar (só clipboard)";
-        assert!(measure(f, msg, 12.0) <= CARD_W - 40.0);
+        let wtype = "wtype ausente — a digitação na app não vai funcionar (só clipboard)";
+        let vad = "VAD ausente — transcrevendo sem filtro de voz; rode whisper setup";
+        let both = "wtype ausente (só clipboard) · VAD ausente (sem filtro de voz)";
+        for msg in [wtype, vad, both] {
+            assert!(
+                measure(f, msg, 12.0) <= CARD_W - 40.0,
+                "aviso não cabe no rodapé: {msg}"
+            );
+        }
         let hints = "Space pausar   ·   Enter concluir   ·   Esc cancelar";
         assert!(measure(f, hints, 12.0) <= CARD_W - 40.0);
     }

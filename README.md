@@ -26,13 +26,13 @@ Build com o devShell (cmake/clang/vulkan):
 
 ```bash
 nix develop          # entra no shell com cmake/clang/vulkan/etc.
-cargo build --release
+cargo build
 ```
 
 Instale no PATH, configure e suba o daemon:
 
 ```bash
-install -Dm755 target/release/whisper ~/.local/bin/whisper
+install -Dm755 target/debug/whisper ~/.local/bin/whisper
 whisper setup              # wizard: língua (pt/en/auto) + modelo + download
 whisper start              # sobe o daemon em background (não trava o shell)
 ```
@@ -53,7 +53,9 @@ com `Enter` — o texto é inserido na app focada.
 
 - Captura via `pw-record` (PipeWire): f32 mono 16 kHz, resample nativo.
 - Transcrição batch no fim da gravação (Vulkan, ~1 s no turbo).
-- Pós-processamento: corte de silêncio, remoção de fillers ("hmm", "ahn"…),
+- Detecção de voz (VAD): só os segmentos de fala vão para o whisper
+  (silêncio e pausas longas ficam de fora).
+- Pós-processamento: remoção de fillers ("hmm", "ahn"…),
   capitalização/pontuação e período final.
 - Inserção: `wtype` digita na app focada + `wl-copy` coloca no clipboard
   (modo configurável; se o `wtype` falhar, o texto está no clipboard).
@@ -106,7 +108,7 @@ Referência completa de opções, modelos e download:
 
 ```sh
 nix develop          # entra no shell com cmake/clang/vulkan/etc.
-cargo build --release
+cargo build
 ```
 
 Ou instale direto: `nix build` → `result/bin/whisper`.
@@ -134,7 +136,7 @@ Ou instale direto: `nix build` → `result/bin/whisper`.
   ```sh
   WHISPER_MODEL=~/.local/share/whisper/models/ggml-tiny.bin \
   WHISPER_WAV=/tmp/jfk.wav \
-  cargo test --release transcribe_jfk -- --ignored
+  cargo test transcribe_jfk -- --ignored
   ```
 
 - Fonte embutida: DejaVu Sans (licença Bitstream Vera/DejaVu, ver `assets/`).

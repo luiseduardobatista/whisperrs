@@ -14,6 +14,8 @@ pub struct ModelSpec {
     pub name: &'static str,
     pub file: &'static str,
     pub size_mb: u64,
+    /// Repositório HuggingFace do arquivo (resolve/main).
+    pub base_url: &'static str,
 }
 
 /// Modelos multilíngues oficiais de ggml-org/whisper.cpp.
@@ -22,35 +24,51 @@ pub const MODELS: &[ModelSpec] = &[
         name: "tiny",
         file: "ggml-tiny.bin",
         size_mb: 75,
+        base_url: WHISPER_BASE_URL,
     },
     ModelSpec {
         name: "base",
         file: "ggml-base.bin",
         size_mb: 142,
+        base_url: WHISPER_BASE_URL,
     },
     ModelSpec {
         name: "small",
         file: "ggml-small.bin",
         size_mb: 466,
+        base_url: WHISPER_BASE_URL,
     },
     ModelSpec {
         name: "medium",
         file: "ggml-medium.bin",
         size_mb: 1_535,
+        base_url: WHISPER_BASE_URL,
     },
     ModelSpec {
         name: "large-v3",
         file: "ggml-large-v3.bin",
         size_mb: 3_093,
+        base_url: WHISPER_BASE_URL,
     },
     ModelSpec {
         name: "turbo",
         file: "ggml-large-v3-turbo.bin",
         size_mb: 1_620,
+        base_url: WHISPER_BASE_URL,
     },
 ];
 
-const BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+/// Modelo VAD (Silero) fixo, baixado pelo `whisper setup` junto com o modelo
+/// de transcrição. Fica fora de `MODELS`: não é modelo selecionável.
+pub const VAD_MODEL: ModelSpec = ModelSpec {
+    name: "silero-v6.2.0",
+    file: "ggml-silero-v6.2.0.bin",
+    size_mb: 1,
+    base_url: VAD_BASE_URL,
+};
+
+const WHISPER_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+const VAD_BASE_URL: &str = "https://huggingface.co/ggml-org/whisper-vad/resolve/main";
 
 /// Conexões paralelas por download (mesmo default do aria2c `-x 16`).
 const MAX_CONNECTIONS: u64 = 16;
@@ -69,6 +87,10 @@ pub fn models_dir() -> PathBuf {
     crate::config::data_dir().join("models")
 }
 
+pub fn vad_model_path() -> PathBuf {
+    models_dir().join(VAD_MODEL.file)
+}
+
 /// Baixa o modelo para `dest` (idempotente: modelo já existente é pulado).
 /// Usa HTTP Range em conexões paralelas quando o servidor suporta (206);
 /// uma falha remove o arquivo parcial para não envenenar a próxima tentativa.
@@ -76,7 +98,7 @@ pub fn download(spec: &ModelSpec, dest: &Path) -> Result<()> {
     if dest.exists() {
         return Ok(());
     }
-    let url = format!("{BASE_URL}/{}", spec.file);
+    let url = format!("{}/{}", spec.base_url, spec.file);
     let result = download_impl(spec, &url, dest);
     if result.is_err() {
         let _ = std::fs::remove_file(dest);
@@ -263,6 +285,19 @@ mod tests {
         }
         assert_eq!(find("turbo").unwrap().file, "ggml-large-v3-turbo.bin");
         assert!(find("inexistente").is_none());
+    }
+
+    #[test]
+    fn vad_model_is_not_selectable_but_has_expected_origin() {
+        assert!(find(VAD_MODEL.name).is_none());
+        // Campos exatos protegem contra typo no arquivo/repositório.
+        assert_eq!(VAD_MODEL.file, "ggml-silero-v6.2.0.bin");
+        assert_eq!(
+            VAD_MODEL.base_url,
+            "https://huggingface.co/ggml-org/whisper-vad/resolve/main"
+        );
+        assert_eq!(VAD_MODEL.size_mb, 1);
+        assert_eq!(vad_model_path(), models_dir().join(VAD_MODEL.file));
     }
 
     #[test]

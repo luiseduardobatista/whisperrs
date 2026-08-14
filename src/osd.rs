@@ -317,10 +317,11 @@ impl SeatHandler for App {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
-        if capability == Capability::Keyboard && self.keyboard.is_none() {
-            if let Ok(keyboard) = self.seat_state.get_keyboard(qh, &seat, None) {
-                self.keyboard = Some(keyboard);
-            }
+        if capability == Capability::Keyboard
+            && self.keyboard.is_none()
+            && let Ok(keyboard) = self.seat_state.get_keyboard(qh, &seat, None)
+        {
+            self.keyboard = Some(keyboard);
         }
     }
 
@@ -331,10 +332,10 @@ impl SeatHandler for App {
         _: wl_seat::WlSeat,
         capability: Capability,
     ) {
-        if capability == Capability::Keyboard {
-            if let Some(keyboard) = self.keyboard.take() {
-                keyboard.release();
-            }
+        if capability == Capability::Keyboard
+            && let Some(keyboard) = self.keyboard.take()
+        {
+            keyboard.release();
         }
     }
 
