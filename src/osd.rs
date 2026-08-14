@@ -18,7 +18,7 @@ use anyhow::{Context, Result};
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
-use smithay_client_toolkit::seat::keyboard::{KeyEvent, KeyboardHandler, Keysym};
+use smithay_client_toolkit::seat::keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers};
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
 use smithay_client_toolkit::shell::WaylandSurface;
 use smithay_client_toolkit::shell::wlr_layer::{
@@ -58,6 +58,8 @@ pub struct UiState {
     pub status: Option<String>,
     /// Aviso persistente exibido no rodapé do cartão (ex.: wtype ausente).
     pub warning: Option<String>,
+    /// Indica que o próximo ditado pode conter uma instrução de transformação.
+    pub smart: bool,
     pub levels: VecDeque<f32>,
     pub lang_model: String,
 }
@@ -68,6 +70,7 @@ impl UiState {
             phase: Phase::Loading,
             status: None,
             warning: None,
+            smart: false,
             levels: VecDeque::new(),
             lang_model,
         }
@@ -86,6 +89,7 @@ pub enum OsdEvent {
     PauseToggle,
     Commit,
     Cancel,
+    SmartToggle,
     Closed,
 }
 
@@ -104,6 +108,7 @@ struct App {
     scale: u32,
     configured: bool,
     keyboard: Option<wl_keyboard::WlKeyboard>,
+    modifiers: Modifiers,
     ui: Arc<Mutex<UiState>>,
     events_tx: Sender<OsdEvent>,
     commands_rx: Receiver<OsdCommand>,
@@ -184,6 +189,7 @@ pub fn run(
         scale: 1,
         configured: false,
         keyboard: None,
+        modifiers: Modifiers::default(),
         ui,
         events_tx,
         commands_rx,
@@ -379,6 +385,12 @@ impl KeyboardHandler for App {
             Some(OsdEvent::Commit)
         } else if event.keysym == Keysym::Escape {
             Some(OsdEvent::Cancel)
+        } else if event.keysym == Keysym::s
+            && !self.modifiers.ctrl
+            && !self.modifiers.alt
+            && !self.modifiers.logo
+        {
+            Some(OsdEvent::SmartToggle)
         } else {
             None
         };
@@ -413,10 +425,11 @@ impl KeyboardHandler for App {
         _: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
         _: u32,
-        _: smithay_client_toolkit::seat::keyboard::Modifiers,
+        modifiers: Modifiers,
         _: smithay_client_toolkit::seat::keyboard::RawModifiers,
         _: u32,
     ) {
+        self.modifiers = modifiers;
     }
 }
 

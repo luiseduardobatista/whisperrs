@@ -4,6 +4,7 @@ use crate::audio::{self, Capture};
 use crate::config::{Config, InsertMode, config_mtime};
 use crate::insert;
 use crate::ipc::{self, Cmd, Response};
+use crate::llm;
 use crate::model;
 use crate::osd::{OsdCommand, OsdEvent, Phase as UiPhase, UiState};
 use crate::postprocess;
@@ -40,8 +41,18 @@ struct AudioChunk {
 }
 
 enum WorkerOutcome {
-    Transcribed { text: String },
-    Failed(String),
+    Transcribed { session: u64, text: String },
+    Failed { session: u64, msg: String },
+}
+
+impl WorkerOutcome {
+    fn session(&self) -> u64 {
+        match self {
+            WorkerOutcome::Transcribed { session, .. } | WorkerOutcome::Failed { session, .. } => {
+                *session
+            }
+        }
+    }
 }
 
 enum DaemonEvent {
@@ -68,6 +79,10 @@ struct Daemon {
     /// Texto transcrito aguardando o OSD fechar para digitar na app
     /// (o OSD visível segura o foco de teclado; wtype digitaria nele).
     pending_insert: Option<String>,
+    llm: Arc<llm::Llm>,
+    smart_mode: bool,
+    /// Contador de sessões: descarta resultados de workers de sessões antigas.
+    session: u64,
     events_rx: Receiver<DaemonEvent>,
     events_tx: Sender<DaemonEvent>,
 }
@@ -97,10 +112,14 @@ pub fn run() -> Result<()> {
         ui: Arc::new(Mutex::new(UiState::new(String::new()))),
         osd: None,
         pending_insert: None,
+        llm: Arc::new(llm::Llm::default()),
+        smart_mode: false,
+        session: 0,
         events_rx,
         events_tx,
     };
     warn_if_wtype_missing(&daemon.cfg);
+    warn_if_ai_missing(&daemon.cfg);
     daemon.loop_forever();
     let _ = std::fs::remove_file(crate::config::socket_path());
     Ok(())
@@ -119,6 +138,15 @@ fn warn_if_wtype_missing(cfg: &Config) {
     }
 }
 
+fn warn_if_ai_missing(cfg: &Config) {
+    if cfg.ai.enabled && (cfg.ai_model_path().is_none() || !llm::Llm::server_available()) {
+        eprintln!(
+            "whisper: aviso: Qwen indisponível — cleanup em Rust. {}",
+            llm::Llm::hint()
+        );
+    }
+}
+
 fn lang_model(cfg: &Config) -> String {
     format!("{} · {}", cfg.language.label(), cfg.model)
 }
@@ -133,6 +161,7 @@ impl Daemon {
                     DaemonEvent::Ipc(cmd, reply) => {
                         if matches!(cmd, Cmd::Stop) {
                             self.cancel_session();
+                            self.kill_llm();
                             let _ = reply.send(Response {
                                 state: "stopping".to_string(),
                                 error: None,
@@ -170,9 +199,13 @@ impl Daemon {
                 let engine_changed = cfg.model != self.cfg.model
                     || cfg.gpu_device != self.cfg.gpu_device
                     || cfg.threads != self.cfg.threads;
+                let ai_changed = cfg.ai != self.cfg.ai;
                 self.cfg = cfg;
                 if engine_changed {
                     self.pending_engine_reload = true;
+                }
+                if ai_changed {
+                    self.kill_llm();
                 }
                 eprintln!("whisper: config recarregada");
             }
@@ -237,6 +270,16 @@ impl Daemon {
             },
             OsdEvent::Commit => self.commit(),
             OsdEvent::Cancel => self.cancel_session(),
+            OsdEvent::SmartToggle => {
+                if self.cfg.ai.enabled {
+                    self.smart_mode = !self.smart_mode;
+                    if let Ok(mut ui) = self.ui.lock() {
+                        ui.smart = self.smart_mode;
+                    }
+                } else {
+                    eprintln!("whisper: modo smart ignorado: [ai] enabled = false");
+                }
+            }
             OsdEvent::Closed => {
                 if let Some(text) = self.pending_insert.take() {
                     // OSD fechado: o foco voltou à app, agora digita.
@@ -281,8 +324,12 @@ impl Daemon {
     }
 
     fn handle_worker(&mut self, out: WorkerOutcome) {
+        if self.phase != Phase::Transcribing || out.session() != self.session {
+            eprintln!("whisper: resultado descartado (sessão cancelada)");
+            return;
+        }
         match out {
-            WorkerOutcome::Transcribed { text } => {
+            WorkerOutcome::Transcribed { text, .. } => {
                 if text.is_empty() {
                     self.finish_session(Some("nada detectado".to_string()));
                     return;
@@ -292,7 +339,7 @@ impl Daemon {
                 // termina e digita direto na app focada (via evento Closed).
                 self.close_osd();
             }
-            WorkerOutcome::Failed(msg) => {
+            WorkerOutcome::Failed { msg, .. } => {
                 self.set_ui(UiPhase::Error, Some(msg));
                 std::thread::sleep(Duration::from_millis(2500));
                 self.finish_session(None);
@@ -334,6 +381,8 @@ impl Daemon {
     }
 
     fn start_session(&mut self) {
+        self.session = self.session.wrapping_add(1);
+        self.smart_mode = false;
         let ui = UiState::new(lang_model(&self.cfg));
         self.ui = Arc::new(Mutex::new(ui));
         // Avisos no rodapé do cartão (wtype/VAD ausentes): o usuário vê antes
@@ -428,9 +477,12 @@ impl Daemon {
         self.set_phase(Phase::Transcribing, Some("transcrevendo…".to_string()));
         let samples = std::mem::take(&mut self.buffer);
         let cfg = self.cfg.clone();
+        let smart = self.smart_mode;
+        let session = self.session;
+        let llm = Arc::clone(&self.llm);
         let tx = self.events_tx.clone();
         std::thread::spawn(move || {
-            let out = transcribe_worker(&engine, samples, &cfg);
+            let out = transcribe_worker(&engine, samples, &cfg, smart, session, llm);
             let _ = tx.send(DaemonEvent::Worker(out));
         });
     }
@@ -455,7 +507,7 @@ impl Daemon {
         }
     }
 
-    /// Atualiza o aviso do rodapé do OSD conforme wtype/VAD disponíveis.
+    /// Atualiza o aviso do rodapé do OSD conforme as dependências disponíveis.
     fn refresh_warning(&mut self) {
         let wtype_missing = matches!(self.cfg.insert_mode, InsertMode::Type | InsertMode::Both)
             && !insert::wtype_available();
@@ -464,9 +516,19 @@ impl Daemon {
             .as_ref()
             .map(|e| !e.vad_available())
             .unwrap_or(false);
+        let ai_missing = self.cfg.ai.enabled
+            && (self.cfg.ai_model_path().is_none() || !llm::Llm::server_available());
         if let Ok(mut ui) = self.ui.lock() {
-            ui.warning = compose_warning(wtype_missing, vad_missing);
+            ui.warning = compose_warning(wtype_missing, vad_missing, ai_missing);
         }
+    }
+
+    fn kill_llm(&mut self) {
+        // `kill` nunca espera request em andamento (a trava do child do
+        // servidor é curta), então a chamada é síncrona: sem thread
+        // destacada que poderia morrer junto com o daemon (servidor órfão)
+        // ou matar um servidor recém-subido com config nova.
+        self.llm.kill();
     }
 
     fn close_osd(&mut self) {
@@ -493,30 +555,84 @@ impl Daemon {
     }
 }
 
-fn transcribe_worker(engine: &Engine, samples: Vec<f32>, cfg: &Config) -> WorkerOutcome {
+fn transcribe_worker(
+    engine: &Engine,
+    samples: Vec<f32>,
+    cfg: &Config,
+    smart: bool,
+    session: u64,
+    llm: Arc<llm::Llm>,
+) -> WorkerOutcome {
     let samples = match engine.filter_speech(samples) {
         Ok(s) => s,
-        Err(e) => return WorkerOutcome::Failed(format!("detecção de voz falhou: {e:#}")),
+        Err(e) => {
+            return WorkerOutcome::Failed {
+                session,
+                msg: format!("detecção de voz falhou: {e:#}"),
+            };
+        }
     };
     if samples.is_empty() {
         return WorkerOutcome::Transcribed {
+            session,
             text: String::new(),
         };
     }
     let raw = match engine.transcribe(&samples, cfg.language.whisper_code()) {
         Ok(text) => text,
-        Err(e) => return WorkerOutcome::Failed(format!("transcrição falhou: {e:#}")),
+        Err(e) => {
+            return WorkerOutcome::Failed {
+                session,
+                msg: format!("transcrição falhou: {e:#}"),
+            };
+        }
     };
-    let mut text = raw;
+    let fallback = rust_cleanup(&raw, cfg);
+    let text = if use_ai(cfg, smart) {
+        match llm_process(cfg, smart, &raw, llm) {
+            Ok(text) if plausible_no_think_ok(&raw, &text, smart) => text,
+            Ok(_) => {
+                eprintln!("whisper: resposta do Qwen rejeitada — usando fallback");
+                fallback
+            }
+            Err(e) => {
+                eprintln!("whisper: qwen falhou ({e:#}) — usando fallback");
+                fallback
+            }
+        }
+    } else {
+        fallback
+    };
+    // A inserção (wtype) fica com o daemon, DEPOIS que o OSD fechar: com o
+    // OSD visível o foco de teclado é dele e as teclas não chegariam à app.
+    WorkerOutcome::Transcribed { session, text }
+}
+
+fn rust_cleanup(text: &str, cfg: &Config) -> String {
+    let mut text = text.to_string();
     if cfg.remove_fillers {
         text = postprocess::remove_fillers(&text, cfg.language);
     }
     if cfg.punctuation {
         text = postprocess::fix_punctuation(&text, cfg.final_period);
     }
-    // A inserção (wtype) fica com o daemon, DEPOIS que o OSD fechar: com o
-    // OSD visível o foco de teclado é dele e as teclas não chegariam à app.
-    WorkerOutcome::Transcribed { text }
+    text
+}
+
+fn use_ai(cfg: &Config, smart: bool) -> bool {
+    cfg.ai.enabled && (smart || cfg.ai.cleanup) && cfg.ai_model_path().is_some()
+}
+
+fn llm_process(cfg: &Config, smart: bool, raw: &str, llm: Arc<llm::Llm>) -> anyhow::Result<String> {
+    llm.process(&cfg.ai, cfg.threads, raw, smart)
+}
+
+fn plausible_no_think_ok(raw: &str, out: &str, smart: bool) -> bool {
+    if smart {
+        llm::basic_ok(out, raw)
+    } else {
+        llm::plausible(raw, out)
+    }
 }
 
 /// Sobe o engine em background (primeira sessão ou hot reload da config).
@@ -537,19 +653,29 @@ fn spawn_engine_load(cfg: &Config, tx: &Sender<DaemonEvent>) {
 }
 
 /// Compõe o aviso único do rodapé do OSD a partir das indisponibilidades de
-/// wtype (digitação) e VAD (filtro de voz); `None` quando nada falta.
-fn compose_warning(wtype_missing: bool, vad_missing: bool) -> Option<String> {
-    match (wtype_missing, vad_missing) {
-        (true, true) => {
-            Some("wtype ausente (só clipboard) · VAD ausente (sem filtro de voz)".to_string())
-        }
-        (true, false) => {
+/// wtype, VAD e Qwen; `None` quando nada falta.
+fn compose_warning(wtype_missing: bool, vad_missing: bool, ai_missing: bool) -> Option<String> {
+    match (wtype_missing, vad_missing, ai_missing) {
+        (false, false, false) => None,
+        (false, false, true) => Some("Qwen ausente — cleanup Rust; rode whisper setup".to_string()),
+        (true, false, false) => {
             Some("wtype ausente — a digitação na app não vai funcionar (só clipboard)".to_string())
         }
-        (false, true) => {
+        (false, true, false) => {
             Some("VAD ausente — transcrevendo sem filtro de voz; rode whisper setup".to_string())
         }
-        (false, false) => None,
+        (true, true, false) => {
+            Some("wtype ausente (só clipboard) · VAD ausente (sem filtro de voz)".to_string())
+        }
+        (true, false, true) => {
+            Some("wtype e Qwen ausentes — digitação e cleanup limitados".to_string())
+        }
+        (false, true, true) => {
+            Some("VAD e Qwen ausentes — cleanup limitado; rode whisper setup".to_string())
+        }
+        (true, true, true) => {
+            Some("wtype, VAD e Qwen ausentes — digitação e cleanup limitados".to_string())
+        }
     }
 }
 
@@ -577,14 +703,73 @@ mod tests {
     }
 
     #[test]
-    fn warning_composes_wtype_and_vad() {
-        assert_eq!(compose_warning(false, false), None);
-        let only_vad = compose_warning(false, true).unwrap();
-        assert!(only_vad.contains("VAD ausente"));
-        assert!(!only_vad.contains("wtype"));
-        let only_wtype = compose_warning(true, false).unwrap();
-        assert!(only_wtype.contains("wtype ausente"));
-        let both = compose_warning(true, true).unwrap();
+    fn warning_composes_all_dependency_combinations() {
+        assert_eq!(compose_warning(false, false, false), None);
+        assert_eq!(
+            compose_warning(false, false, true).as_deref(),
+            Some("Qwen ausente — cleanup Rust; rode whisper setup")
+        );
+        assert_eq!(
+            compose_warning(true, false, true).as_deref(),
+            Some("wtype e Qwen ausentes — digitação e cleanup limitados")
+        );
+        assert_eq!(
+            compose_warning(false, true, true).as_deref(),
+            Some("VAD e Qwen ausentes — cleanup limitado; rode whisper setup")
+        );
+        assert_eq!(
+            compose_warning(true, true, true).as_deref(),
+            Some("wtype, VAD e Qwen ausentes — digitação e cleanup limitados")
+        );
+        assert!(
+            compose_warning(true, false, false)
+                .unwrap()
+                .contains("wtype ausente")
+        );
+        assert!(
+            compose_warning(false, true, false)
+                .unwrap()
+                .contains("VAD ausente")
+        );
+        let both = compose_warning(true, true, false).unwrap();
         assert!(both.contains("wtype ausente") && both.contains("VAD ausente"));
+    }
+
+    #[test]
+    fn use_ai_obeys_enabled_cleanup_smart_and_model_presence() {
+        let path = std::env::temp_dir().join(format!(
+            "whisper-ai-use-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"modelo").unwrap();
+        let mut cfg = Config::default();
+        cfg.ai.model = path.display().to_string();
+        cfg.ai.cleanup = false;
+        assert!(!use_ai(&cfg, false));
+        assert!(use_ai(&cfg, true));
+        cfg.ai.enabled = false;
+        assert!(!use_ai(&cfg, true));
+        cfg.ai.enabled = true;
+        cfg.ai.cleanup = true;
+        assert!(use_ai(&cfg, false));
+        std::fs::remove_file(&path).unwrap();
+        assert!(!use_ai(&cfg, true));
+    }
+
+    #[test]
+    fn rust_cleanup_respects_flags() {
+        let cfg = Config::default();
+        assert_eq!(rust_cleanup("hmm então ahn vamos", &cfg), "Então vamos.");
+        let mut disabled = cfg.clone();
+        disabled.remove_fillers = false;
+        disabled.punctuation = false;
+        assert_eq!(
+            rust_cleanup("hmm então ahn vamos", &disabled),
+            "hmm então ahn vamos"
+        );
     }
 }

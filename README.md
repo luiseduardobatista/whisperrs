@@ -56,7 +56,8 @@ com `Enter` — o texto é inserido na app focada.
 - Detecção de voz (VAD): só os segmentos de fala vão para o whisper
   (silêncio e pausas longas ficam de fora).
 - Pós-processamento: remoção de fillers ("hmm", "ahn"…),
-  capitalização/pontuação e período final.
+  capitalização/pontuação e período final; opcionalmente Qwen3.5-0.8B local
+  via `llama-server` (com fallback automático para o cleanup Rust).
 - Inserção: `wtype` digita na app focada + `wl-copy` coloca no clipboard
   (modo configurável; se o `wtype` falhar, o texto está no clipboard).
 - OSD em `wlr-layer-shell` (Niri, Sway, Hyprland, KDE ≥ 6.3, COSMIC) com
@@ -86,6 +87,7 @@ Sessão de ditado:
 | `Space` | pausar/retomar a gravação |
 | `Enter` | concluir: transcreve, insere na app focada e fecha |
 | `Esc` | cancelar e descartar |
+| `S` | alternar o modo smart do Qwen (se habilitado) |
 
 Integrações (Niri, systemd) e problemas comuns: [docs/usage.md](docs/usage.md).
 
@@ -101,6 +103,18 @@ atual). Config inválida é ignorada (mantém a anterior).
 
 Referência completa de opções, modelos e download:
 [docs/configuration.md](docs/configuration.md).
+
+Para usar o pós-processamento Qwen, instale o modelo com
+`whisper setup --ai-model qwen3.5-0.8b` e mantenha `llama-server` no PATH:
+
+```toml
+[ai]
+enabled = true
+model = "qwen3.5-0.8b"
+context_size = 2048
+gpu = true
+cleanup = true
+```
 
 ---
 

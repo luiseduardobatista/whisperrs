@@ -7,7 +7,7 @@ com compositor/systemd e os problemas comuns.
 
 | Comando | Descrição |
 |---------|-----------|
-| `whisper setup [--lang pt\|en\|auto] [--model …]` | wizard: língua + modelo + download (gera o `config.toml`) |
+| `whisper setup [--lang pt\|en\|auto] [--model …] [--ai-model qwen3.5-0.8b]` | wizard: língua + modelos + download (gera o `config.toml`) |
 | `whisper start` | sobe o daemon em background; idempotente |
 | `whisper stop` | derruba o daemon (encerra sessão ativa e remove o socket) |
 | `whisper status` | mostra o estado do daemon (`idle`, `recording`, …) |
@@ -31,7 +31,9 @@ ativa (captura e OSD), responde `stopping`, remove o socket e sai.
 ### setup
 
 `whisper setup` é um wizard interativo de língua e modelo; flags `--lang` e
-`--model` pulam a interação. Baixa o modelo (se ainda não existir) e salva
+`--model` pulam a interação. `--ai-model qwen3.5-0.8b` baixa o GGUF Qwen e o
+ativa no catálogo, sem alterar `ai.enabled`; o modelo é carregado sob demanda.
+Baixa os modelos (se ainda não existirem) e salva
 `~/.config/whisper/config.toml`. O download usa **conexões paralelas** (HTTP
 Range, até 16, como o aria2c `-x 16`) para aproveitar a banda; falha remove o
 arquivo parcial para não envenenar uma próxima tentativa.
@@ -45,6 +47,7 @@ O `toggle` abre o OSD na borda inferior da tela com a waveform ao vivo:
 | `Space` | pausar/retomar a gravação |
 | `Enter` | concluir: transcreve, insere na app focada e fecha |
 | `Esc` | cancelar e descartar |
+| `S` | alternar o modo smart do Qwen |
 
 Fluxo interno de uma sessão:
 

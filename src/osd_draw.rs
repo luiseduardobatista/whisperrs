@@ -87,6 +87,21 @@ pub(crate) fn draw_card(pix: &mut PixmapMut<'_>, t: Transform, ui: &UiState, fon
 
     let label = phase_label(ui.phase);
     let lw = measure(font, label, 13.0);
+    if ui.smart {
+        let smart_label = "smart";
+        let smart_w = measure(font, smart_label, 13.0);
+        draw_text(
+            pix,
+            font,
+            smart_label,
+            cx + w - 14.0 - lw - smart_w - 10.0,
+            cy + 30.0,
+            13.0,
+            (147, 112, 219, 255),
+            w - 40.0,
+            t,
+        );
+    }
     draw_text(
         pix,
         font,
@@ -146,7 +161,7 @@ pub(crate) fn draw_card(pix: &mut PixmapMut<'_>, t: Transform, ui: &UiState, fon
         t,
     );
 
-    let hints = "Space pausar   ·   Enter concluir   ·   Esc cancelar";
+    let hints = "Space pausar · Enter concluir · Esc cancelar · S smart";
     let (footer, color) = match &ui.warning {
         Some(w) => (w.as_str(), (241, 196, 15, 255)), // âmbar: atenção
         None => (hints, (120, 120, 130, 255)),
@@ -268,6 +283,7 @@ mod tests {
         let mut pix = Pixmap::new(800, 180).unwrap();
         let mut ui = UiState::new("pt · turbo".to_string());
         ui.phase = Phase::Recording;
+        ui.smart = true;
         for i in 0..10 {
             ui.push_level(i as f32 / 10.0);
         }
@@ -295,13 +311,17 @@ mod tests {
         let wtype = "wtype ausente — a digitação na app não vai funcionar (só clipboard)";
         let vad = "VAD ausente — transcrevendo sem filtro de voz; rode whisper setup";
         let both = "wtype ausente (só clipboard) · VAD ausente (sem filtro de voz)";
-        for msg in [wtype, vad, both] {
+        let ai = "Qwen ausente — cleanup Rust; rode whisper setup";
+        let wtype_ai = "wtype e Qwen ausentes — digitação e cleanup limitados";
+        let vad_ai = "VAD e Qwen ausentes — cleanup limitado; rode whisper setup";
+        let all = "wtype, VAD e Qwen ausentes — digitação e cleanup limitados";
+        for msg in [wtype, vad, both, ai, wtype_ai, vad_ai, all] {
             assert!(
                 measure(f, msg, 12.0) <= CARD_W - 40.0,
                 "aviso não cabe no rodapé: {msg}"
             );
         }
-        let hints = "Space pausar   ·   Enter concluir   ·   Esc cancelar";
+        let hints = "Space pausar · Enter concluir · Esc cancelar · S smart";
         assert!(measure(f, hints, 12.0) <= CARD_W - 40.0);
     }
 
