@@ -21,6 +21,18 @@ enum Phase {
     Loading,
 }
 
+impl Phase {
+    fn ui_phase(self) -> Option<UiPhase> {
+        match self {
+            Phase::Idle => None,
+            Phase::Recording => Some(UiPhase::Recording),
+            Phase::Paused => Some(UiPhase::Paused),
+            Phase::Transcribing => Some(UiPhase::Transcribing),
+            Phase::Loading => Some(UiPhase::Loading),
+        }
+    }
+}
+
 struct AudioChunk {
     samples: Vec<f32>,
     rms: f32,
@@ -227,14 +239,8 @@ impl Daemon {
     fn handle_osd(&mut self, ev: OsdEvent) {
         match ev {
             OsdEvent::PauseToggle => match self.phase {
-                Phase::Recording => {
-                    self.phase = Phase::Paused;
-                    self.set_ui(UiPhase::Paused, None);
-                }
-                Phase::Paused => {
-                    self.phase = Phase::Recording;
-                    self.set_ui(UiPhase::Recording, None);
-                }
+                Phase::Recording => self.set_phase(Phase::Paused, None),
+                Phase::Paused => self.set_phase(Phase::Recording, None),
                 _ => {}
             },
             OsdEvent::Commit => self.commit(),
@@ -307,8 +313,7 @@ impl Daemon {
             Ok(engine) => {
                 self.engine = Some(engine);
                 if self.phase == Phase::Loading {
-                    self.phase = Phase::Recording;
-                    self.set_ui(UiPhase::Recording, None);
+                    self.set_phase(Phase::Recording, None);
                     self.start_capture();
                 } else if self.phase == Phase::Idle {
                     // Troca de modelo em background (hot reload da config).
@@ -363,8 +368,7 @@ impl Daemon {
         self.buffer.clear();
 
         if self.engine.is_none() {
-            self.phase = Phase::Loading;
-            self.set_ui(UiPhase::Loading, Some("carregando modelo…".to_string()));
+            self.set_phase(Phase::Loading, Some("carregando modelo…".to_string()));
             let cfg = self.cfg.clone();
             let tx = self.events_tx.clone();
             std::thread::spawn(move || {
@@ -374,8 +378,7 @@ impl Daemon {
                 let _ = tx.send(DaemonEvent::EngineLoaded(res));
             });
         } else {
-            self.phase = Phase::Recording;
-            self.set_ui(UiPhase::Recording, None);
+            self.set_phase(Phase::Recording, None);
             self.start_capture();
         }
     }
@@ -430,8 +433,7 @@ impl Daemon {
                 return;
             }
         };
-        self.phase = Phase::Transcribing;
-        self.set_ui(UiPhase::Transcribing, Some("transcrevendo…".to_string()));
+        self.set_phase(Phase::Transcribing, Some("transcrevendo…".to_string()));
         let samples = std::mem::take(&mut self.buffer);
         let cfg = self.cfg.clone();
         let tx = self.events_tx.clone();
@@ -444,6 +446,13 @@ impl Daemon {
     fn stop_capture(&mut self) {
         if let Some(mut capture) = self.capture.take() {
             capture.stop();
+        }
+    }
+
+    fn set_phase(&mut self, phase: Phase, status: Option<String>) {
+        self.phase = phase;
+        if let Some(ui_phase) = phase.ui_phase() {
+            self.set_ui(ui_phase, status);
         }
     }
 
@@ -501,4 +510,28 @@ fn transcribe_worker(engine: &Engine, mut samples: Vec<f32>, cfg: &Config) -> Wo
     // A inserção (wtype) fica com o daemon, DEPOIS que o OSD fechar: com o
     // OSD visível o foco de teclado é dele e as teclas não chegariam à app.
     WorkerOutcome::Transcribed { text }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_has_no_ui_phase() {
+        assert_eq!(Phase::Idle.ui_phase(), None);
+    }
+
+    #[test]
+    fn active_phases_map_to_their_ui_phase() {
+        let cases = [
+            (Phase::Recording, UiPhase::Recording),
+            (Phase::Paused, UiPhase::Paused),
+            (Phase::Transcribing, UiPhase::Transcribing),
+            (Phase::Loading, UiPhase::Loading),
+        ];
+
+        for (phase, expected) in cases {
+            assert_eq!(phase.ui_phase(), Some(expected));
+        }
+    }
 }

@@ -6,6 +6,7 @@ mod insert;
 mod ipc;
 mod model;
 mod osd;
+mod osd_draw;
 mod postprocess;
 mod setup;
 mod transcribe;
