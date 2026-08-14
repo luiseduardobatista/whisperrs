@@ -14,14 +14,19 @@ impl Engine {
         let mut params = WhisperContextParameters::default();
         params.use_gpu = true;
         params.gpu_device = gpu_device;
-        let path = model_path.to_str().context("caminho do modelo não é UTF-8")?;
+        let path = model_path
+            .to_str()
+            .context("caminho do modelo não é UTF-8")?;
         let ctx = WhisperContext::new_with_params(path, params).with_context(|| {
             format!(
                 "falha ao carregar {} (rode 'whisper setup')",
                 model_path.display()
             )
         })?;
-        Ok(Engine { ctx, threads: threads.max(1) })
+        Ok(Engine {
+            ctx,
+            threads: threads.max(1),
+        })
     }
 
     /// Transcreve amostras f32 mono 16 kHz. `language = None` → auto-detect.
@@ -34,7 +39,9 @@ impl Engine {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
-        state.full(params, samples).context("falha na transcrição")?;
+        state
+            .full(params, samples)
+            .context("falha na transcrição")?;
         let text: Vec<String> = state.as_iter().map(|s| s.to_string()).collect();
         Ok(text.join(" ").trim().to_string())
     }
@@ -44,11 +51,7 @@ impl Engine {
 mod tests {
     use super::*;
 
-    /// Teste de integração ignorado: transcreve um WAV real no engine Vulkan.
-    /// Uso:
-    ///   WHISPER_MODEL=~/.local/share/whisper/models/ggml-tiny.bin \
-    ///   WHISPER_WAV=/tmp/jfk.wav \
-    ///   cargo test --release transcribe_jfk -- --ignored
+    /// Teste de integração ignorado; execução documentada em docs/development.md.
     #[test]
     #[ignore = "requer modelo e arquivo de áudio reais"]
     fn transcribe_jfk() {

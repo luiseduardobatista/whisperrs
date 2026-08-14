@@ -20,15 +20,15 @@ use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
 use smithay_client_toolkit::seat::keyboard::{KeyEvent, KeyboardHandler, Keysym};
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
+use smithay_client_toolkit::shell::WaylandSurface;
 use smithay_client_toolkit::shell::wlr_layer::{
     Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
     LayerSurfaceConfigure,
 };
+use smithay_client_toolkit::shell::xdg::XdgShell;
 use smithay_client_toolkit::shell::xdg::window::{
     Window, WindowConfigure, WindowDecorations, WindowHandler,
 };
-use smithay_client_toolkit::shell::xdg::XdgShell;
-use smithay_client_toolkit::shell::WaylandSurface;
 use smithay_client_toolkit::shm::slot::SlotPool;
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{
@@ -36,12 +36,12 @@ use smithay_client_toolkit::{
     delegate_seat, delegate_shm, delegate_xdg_shell, delegate_xdg_window,
 };
 use tiny_skia::{PixmapMut, Transform};
+use wayland_client::backend::WaylandError;
 use wayland_client::globals::registry_queue_init;
 use wayland_client::protocol::{wl_keyboard, wl_output, wl_seat, wl_shm, wl_surface};
-use wayland_client::backend::WaylandError;
 use wayland_client::{Connection, QueueHandle};
 
-use crate::osd_draw::{draw_card, font, CARD_H, CARD_W};
+use crate::osd_draw::{CARD_H, CARD_W, draw_card, font};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
@@ -196,8 +196,7 @@ pub fn run(
         if let Some(guard) = conn.prepare_read() {
             match guard.read() {
                 Ok(_) => {}
-                Err(WaylandError::Io(e))
-                    if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(WaylandError::Io(e)) if e.kind() == std::io::ErrorKind::WouldBlock => {}
                 Err(e) => {
                     eprintln!("whisper: leitura wayland: {e}");
                     break;
@@ -466,7 +465,9 @@ impl App {
         let w = 1920 * s;
         let h = CARD_H as i32 * s;
         let stride = w * 4;
-        let Ok((buffer, canvas)) = self.pool.create_buffer(w, h, stride, wl_shm::Format::Argb8888)
+        let Ok((buffer, canvas)) = self
+            .pool
+            .create_buffer(w, h, stride, wl_shm::Format::Argb8888)
         else {
             return;
         };
@@ -477,7 +478,12 @@ impl App {
             Ok(ui) => ui,
             Err(_) => return,
         };
-        draw_card(&mut pix, Transform::from_scale(s as f32, s as f32), &ui, font());
+        draw_card(
+            &mut pix,
+            Transform::from_scale(s as f32, s as f32),
+            &ui,
+            font(),
+        );
         drop(ui);
         self.kind.surface().damage_buffer(0, 0, w, h);
         if buffer.attach_to(self.kind.surface()).is_ok() {

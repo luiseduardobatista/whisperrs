@@ -82,10 +82,10 @@ impl Config {
         if !path.exists() {
             return Ok(Config::default());
         }
-        let raw = std::fs::read_to_string(&path)
-            .with_context(|| format!("lendo {}", path.display()))?;
-        let cfg: Config = toml::from_str(&raw)
-            .with_context(|| format!("parseando {}", path.display()))?;
+        let raw =
+            std::fs::read_to_string(&path).with_context(|| format!("lendo {}", path.display()))?;
+        let cfg: Config =
+            toml::from_str(&raw).with_context(|| format!("parseando {}", path.display()))?;
         Ok(cfg)
     }
 
@@ -102,12 +102,10 @@ impl Config {
     }
 }
 
-/// Diretório de configuração: $XDG_CONFIG_HOME/whisper ou ~/.config/whisper.
 pub fn config_dir() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config").join("whisper")
 }
 
-/// Diretório de dados: $XDG_DATA_HOME/whisper ou ~/.local/share/whisper.
 pub fn data_dir() -> PathBuf {
     xdg("XDG_DATA_HOME", ".local/share").join("whisper")
 }
@@ -119,15 +117,15 @@ pub fn config_path() -> PathBuf {
 /// Última modificação do arquivo de config; `None` se o arquivo não existe
 /// (usado pelo hot reload do daemon para detectar mudanças).
 pub fn config_mtime() -> Option<std::time::SystemTime> {
-    std::fs::metadata(config_path()).and_then(|m| m.modified()).ok()
+    std::fs::metadata(config_path())
+        .and_then(|m| m.modified())
+        .ok()
 }
 
-/// Diretório de estado: $XDG_STATE_HOME/whisper ou ~/.local/state/whisper.
 pub fn state_dir() -> PathBuf {
     xdg("XDG_STATE_HOME", ".local/state").join("whisper")
 }
 
-/// Log do daemon em background (`whisper start`).
 pub fn log_path() -> PathBuf {
     state_dir().join("daemon.log")
 }

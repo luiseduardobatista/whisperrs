@@ -62,7 +62,10 @@ pub fn trim_silence(
 /// Marcadores de fala (filler words) por língua, checados com caixa
 /// insensível e sem afetar palavras reais ("tipo", "é", "um" não entram).
 const FILLERS: &[(Language, &[&str])] = &[
-    (Language::Pt, &["hmm", "ahn", "ãhn", "eh", "hm", "mmm", "ahã"]),
+    (
+        Language::Pt,
+        &["hmm", "ahn", "ãhn", "eh", "hm", "mmm", "ahã"],
+    ),
     (Language::En, &["um", "uh", "hmm", "ah", "er", "mm"]),
 ];
 
@@ -116,7 +119,8 @@ pub fn fix_punctuation(text: &str, final_period: bool) -> String {
         }
     }
 
-    if final_period && !out.is_empty() && !matches!(out.chars().last(), Some('.' | '!' | '?' | '…')) {
+    if final_period && !out.is_empty() && !matches!(out.chars().last(), Some('.' | '!' | '?' | '…'))
+    {
         out.push('.');
     }
     out
@@ -129,7 +133,9 @@ mod tests {
     fn sine(freq: f32, sample_rate: u32, seconds: f32, amp: f32) -> Vec<f32> {
         let n = (sample_rate as f32 * seconds) as usize;
         (0..n)
-            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate as f32).sin() * amp)
+            .map(|i| {
+                (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate as f32).sin() * amp
+            })
             .collect()
     }
 
@@ -182,15 +188,24 @@ mod tests {
 
     #[test]
     fn remove_fillers_pt() {
-        assert_eq!(remove_fillers("hmm então ahn vamos eh testar", Language::Pt), "então vamos testar");
+        assert_eq!(
+            remove_fillers("hmm então ahn vamos eh testar", Language::Pt),
+            "então vamos testar"
+        );
     }
 
     #[test]
     fn remove_fillers_keeps_real_words() {
         // "tipo" e "é" são palavras reais em pt e não devem sumir
-        assert_eq!(remove_fillers("tipo é um teste", Language::Pt), "tipo é um teste");
+        assert_eq!(
+            remove_fillers("tipo é um teste", Language::Pt),
+            "tipo é um teste"
+        );
         // "um" não é filler em inglês? é artigo alemão — em en, "um" é filler legítimo; aqui teste de en:
-        assert_eq!(remove_fillers("um, uh, let me think", Language::En), "let me think");
+        assert_eq!(
+            remove_fillers("um, uh, let me think", Language::En),
+            "let me think"
+        );
     }
 
     #[test]

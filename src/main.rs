@@ -11,7 +11,7 @@ mod postprocess;
 mod setup;
 mod transcribe;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use std::fs::OpenOptions;
 use std::os::unix::process::CommandExt;
@@ -20,7 +20,11 @@ use std::process::{Command as Proc, Stdio};
 use crate::config::{Config, InsertMode};
 
 #[derive(Parser)]
-#[command(name = "whisper", version, about = "Ditado por voz com whisper.cpp + Vulkan")]
+#[command(
+    name = "whisper",
+    version,
+    about = "Ditado por voz com whisper.cpp + Vulkan"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Command,
@@ -113,7 +117,10 @@ fn start() -> Result<()> {
             if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both)
                 && !insert::wtype_available()
             {
-                println!("aviso: wtype não encontrado no PATH — {}", insert::wtype_hint());
+                println!(
+                    "aviso: wtype não encontrado no PATH — {}",
+                    insert::wtype_hint()
+                );
             }
             return Ok(());
         }
@@ -131,7 +138,10 @@ fn wait_daemon_exit() -> Result<()> {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    bail!("daemon antigo não saiu após o stop; verifique o log: {}", crate::config::log_path().display())
+    bail!(
+        "daemon antigo não saiu após o stop; verifique o log: {}",
+        crate::config::log_path().display()
+    )
 }
 
 fn print_response(resp: &ipc::Response) {

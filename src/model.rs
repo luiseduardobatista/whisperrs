@@ -5,8 +5,8 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -18,21 +18,43 @@ pub struct ModelSpec {
 
 /// Modelos multilíngues oficiais de ggml-org/whisper.cpp.
 pub const MODELS: &[ModelSpec] = &[
-    ModelSpec { name: "tiny", file: "ggml-tiny.bin", size_mb: 75 },
-    ModelSpec { name: "base", file: "ggml-base.bin", size_mb: 142 },
-    ModelSpec { name: "small", file: "ggml-small.bin", size_mb: 466 },
-    ModelSpec { name: "medium", file: "ggml-medium.bin", size_mb: 1_535 },
-    ModelSpec { name: "large-v3", file: "ggml-large-v3.bin", size_mb: 3_093 },
-    ModelSpec { name: "turbo", file: "ggml-large-v3-turbo.bin", size_mb: 1_620 },
+    ModelSpec {
+        name: "tiny",
+        file: "ggml-tiny.bin",
+        size_mb: 75,
+    },
+    ModelSpec {
+        name: "base",
+        file: "ggml-base.bin",
+        size_mb: 142,
+    },
+    ModelSpec {
+        name: "small",
+        file: "ggml-small.bin",
+        size_mb: 466,
+    },
+    ModelSpec {
+        name: "medium",
+        file: "ggml-medium.bin",
+        size_mb: 1_535,
+    },
+    ModelSpec {
+        name: "large-v3",
+        file: "ggml-large-v3.bin",
+        size_mb: 3_093,
+    },
+    ModelSpec {
+        name: "turbo",
+        file: "ggml-large-v3-turbo.bin",
+        size_mb: 1_620,
+    },
 ];
 
 const BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
 /// Conexões paralelas por download (mesmo default do aria2c `-x 16`).
 const MAX_CONNECTIONS: u64 = 16;
-/// Tamanho mínimo de cada pedaço baixado em paralelo.
 const CHUNK_SIZE: u64 = 32 * 1024 * 1024;
-/// Buffer de leitura por conexão.
 const BUF_SIZE: usize = 256 * 1024;
 
 pub fn find(name: &str) -> Option<&'static ModelSpec> {
@@ -188,7 +210,6 @@ fn download_parallel(
     }
 }
 
-/// Baixa um intervalo `[start, end]` e grava em `dest` a partir do offset.
 fn download_chunk(
     client: &reqwest::blocking::Client,
     url: &str,
@@ -252,7 +273,10 @@ mod tests {
             "bytes 0-0/123456789".parse().unwrap(),
         );
         assert_eq!(content_range_total(&h), Some(123456789));
-        h.insert(reqwest::header::CONTENT_RANGE, "bytes 0-0/*".parse().unwrap());
+        h.insert(
+            reqwest::header::CONTENT_RANGE,
+            "bytes 0-0/*".parse().unwrap(),
+        );
         assert_eq!(content_range_total(&h), None);
         h.insert(reqwest::header::CONTENT_RANGE, "lixo".parse().unwrap());
         assert_eq!(content_range_total(&h), None);

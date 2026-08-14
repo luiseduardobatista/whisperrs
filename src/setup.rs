@@ -2,9 +2,9 @@
 use crate::config::{Config, InsertMode, Language};
 use crate::insert;
 use crate::model;
-use anyhow::{bail, Result};
-use dialoguer::theme::ColorfulTheme;
+use anyhow::{Result, bail};
 use dialoguer::Select;
+use dialoguer::theme::ColorfulTheme;
 
 const LANG_ITEMS: [&str; 3] = [
     "pt — português",
@@ -31,7 +31,9 @@ pub fn run(lang_flag: Option<String>, model_flag: Option<String>) -> Result<()> 
     let model = match model_flag.as_deref() {
         Some(name) => match model::find(name) {
             Some(m) => m,
-            None => bail!("modelo inválido: {name} (use tiny, base, small, medium, large-v3 ou turbo)"),
+            None => {
+                bail!("modelo inválido: {name} (use tiny, base, small, medium, large-v3 ou turbo)")
+            }
         },
         None => {
             let items: Vec<String> = model::MODELS
@@ -64,7 +66,10 @@ pub fn run(lang_flag: Option<String>, model_flag: Option<String>) -> Result<()> 
     cfg.save()?;
 
     println!();
-    println!("configuração salva em {}", crate::config::config_path().display());
+    println!(
+        "configuração salva em {}",
+        crate::config::config_path().display()
+    );
     println!("modelo em {}", dest.display());
     println!();
     println!("para usar:");
@@ -73,12 +78,14 @@ pub fn run(lang_flag: Option<String>, model_flag: Option<String>) -> Result<()> 
     println!("     Mod+Shift+Space = spawn \"whisper toggle\"");
     println!("  3. fale e use no popup: Space pausar · Enter concluir · Esc cancelar");
 
-    if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both)
-        && !insert::wtype_available()
+    if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both) && !insert::wtype_available()
     {
         println!();
         println!("aviso: 'wtype' não está no PATH — a digitação na app focada não vai funcionar");
-        println!("  (o texto ficará só no clipboard). {}", insert::wtype_hint());
+        println!(
+            "  (o texto ficará só no clipboard). {}",
+            insert::wtype_hint()
+        );
         println!("  Depois de instalar, reinicie o daemon (whisper stop && whisper start).");
     }
     Ok(())

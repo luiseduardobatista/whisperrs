@@ -64,18 +64,15 @@ pub(crate) fn draw_card(pix: &mut PixmapMut<'_>, t: Transform, ui: &UiState, fon
 
     let mut paint = Paint::default();
 
-    // Sombra/fundo do cartão.
     paint.set_color_rgba8(24, 24, 28, 235);
     let rect = Rect::from_xywh(cx, cy, w, h).unwrap();
     let path = rounded_rect_path(rect, 14.0);
     pix.fill_path(&path, &paint, FillRule::Winding, t, None);
 
-    // Barra de status à esquerda (cor da fase).
     paint.set_color_rgba8(r, g, b, 255);
     let bar = Rect::from_xywh(cx + 14.0, cy + 16.0, 4.0, 20.0).unwrap();
     pix.fill_rect(bar, &paint, t, None);
 
-    // Título: língua · modelo.
     draw_text(
         pix,
         font,
@@ -88,7 +85,6 @@ pub(crate) fn draw_card(pix: &mut PixmapMut<'_>, t: Transform, ui: &UiState, fon
         t,
     );
 
-    // Fase à direita.
     let label = phase_label(ui.phase);
     let lw = measure(font, label, 13.0);
     draw_text(
@@ -103,7 +99,6 @@ pub(crate) fn draw_card(pix: &mut PixmapMut<'_>, t: Transform, ui: &UiState, fon
         t,
     );
 
-    // Waveform central.
     let wave_top = 52.0;
     let wave_h = 62.0;
     let n = ui.levels.len();
@@ -132,7 +127,6 @@ pub(crate) fn draw_card(pix: &mut PixmapMut<'_>, t: Transform, ui: &UiState, fon
         pix.fill_rect(base, &paint, t, None);
     }
 
-    // Status principal (texto transcrito, erros etc.).
     let status = ui.status.as_deref().unwrap_or(label);
     let status_color = if ui.phase == Phase::Error {
         (231, 76, 60, 255)
@@ -152,7 +146,6 @@ pub(crate) fn draw_card(pix: &mut PixmapMut<'_>, t: Transform, ui: &UiState, fon
         t,
     );
 
-    // Rodapé: dicas de hotkeys, ou o aviso (ex.: wtype ausente) quando houver.
     let hints = "Space pausar   ·   Enter concluir   ·   Esc cancelar";
     let (footer, color) = match &ui.warning {
         Some(w) => (w.as_str(), (241, 196, 15, 255)), // âmbar: atenção

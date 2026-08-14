@@ -1,14 +1,14 @@
 //! Daemon: orquestra as sessões de ditado — estado, áudio (pw-record),
 //! OSD (teclas), transcrição (whisper-rs) e inserção (wtype/wl-copy).
 use crate::audio::{self, Capture};
-use crate::config::{config_mtime, Config, InsertMode};
+use crate::config::{Config, InsertMode, config_mtime};
 use crate::insert;
 use crate::ipc::{self, Cmd, Response};
 use crate::osd::{OsdCommand, OsdEvent, Phase as UiPhase, UiState};
 use crate::postprocess;
 use crate::transcribe::Engine;
 use anyhow::Result;
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -108,8 +108,7 @@ pub fn run() -> Result<()> {
 /// Avisa (no stderr → daemon.log) se o wtype faltar no PATH quando o modo de
 /// inserção depende dele: a digitação na app vai falhar e sobra só o clipboard.
 fn warn_if_wtype_missing(cfg: &Config) {
-    if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both)
-        && !insert::wtype_available()
+    if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both) && !insert::wtype_available()
     {
         eprintln!(
             "whisper: aviso: wtype não encontrado no PATH — a digitação na app focada vai \
@@ -132,7 +131,6 @@ impl Daemon {
                 Ok(ev) => match ev {
                     DaemonEvent::Ipc(cmd, reply) => {
                         if matches!(cmd, Cmd::Stop) {
-                            // Encerra sessão ativa (captura/OSD) e sai do loop.
                             self.cancel_session();
                             let _ = reply.send(Response {
                                 state: "stopping".to_string(),
@@ -393,7 +391,10 @@ impl Daemon {
                     loop {
                         match audio::read_chunk(&mut stdout) {
                             Ok((samples, rms)) if !samples.is_empty() => {
-                                if tx.send(DaemonEvent::Audio(AudioChunk { samples, rms })).is_err() {
+                                if tx
+                                    .send(DaemonEvent::Audio(AudioChunk { samples, rms }))
+                                    .is_err()
+                                {
                                     break;
                                 }
                             }
@@ -429,7 +430,9 @@ impl Daemon {
         let engine = match &self.engine {
             Some(e) => Arc::clone(e),
             None => {
-                self.finish_session(Some("modelo não carregado: rode 'whisper setup'".to_string()));
+                self.finish_session(Some(
+                    "modelo não carregado: rode 'whisper setup'".to_string(),
+                ));
                 return;
             }
         };
@@ -487,14 +490,14 @@ impl Daemon {
     }
 }
 
-/// Pipeline de transcrição (roda na thread de trabalho):
-/// corta silêncio → whisper → fillers → pontuação → insere na app.
 fn transcribe_worker(engine: &Engine, mut samples: Vec<f32>, cfg: &Config) -> WorkerOutcome {
     if cfg.trim_silence {
         samples = postprocess::trim_silence(&samples, audio::SAMPLE_RATE, 0.01, 500, 300);
     }
     if samples.is_empty() {
-        return WorkerOutcome::Transcribed { text: String::new() };
+        return WorkerOutcome::Transcribed {
+            text: String::new(),
+        };
     }
     let raw = match engine.transcribe(&samples, cfg.language.whisper_code()) {
         Ok(text) => text,
