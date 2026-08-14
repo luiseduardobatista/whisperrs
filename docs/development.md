@@ -158,7 +158,7 @@ permite instruções naturais no início do ditado (como traduzir ou resumir).
 O teste de integração do servidor real é ignorado por padrão e requer:
 
 ```sh
-WHISPER_AI_MODEL=/caminho/Qwen3.5-0.8B-Q5_K_M.gguf \
+WHISPER_AI_MODEL=/caminho/Qwen_Qwen3.5-0.8B-Q5_K_M.gguf \
   cargo test llm::tests::process_real_model -- --ignored
 ```
 

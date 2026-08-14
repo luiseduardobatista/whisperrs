@@ -62,7 +62,7 @@ pub const MODELS: &[ModelSpec] = &[
 /// selecionáveis no setup normal de transcrição).
 pub const LLM_MODELS: &[ModelSpec] = &[ModelSpec {
     name: "qwen3.5-0.8b",
-    file: "Qwen3.5-0.8B-Q5_K_M.gguf",
+    file: "Qwen_Qwen3.5-0.8B-Q5_K_M.gguf",
     size_mb: 650,
     base_url: "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main",
 }];
@@ -304,7 +304,7 @@ mod tests {
     fn llm_catalog_is_separate_and_exact() {
         let spec = find_llm("qwen3.5-0.8b").unwrap();
         assert!(find("qwen3.5-0.8b").is_none());
-        assert_eq!(spec.file, "Qwen3.5-0.8B-Q5_K_M.gguf");
+        assert_eq!(spec.file, "Qwen_Qwen3.5-0.8B-Q5_K_M.gguf");
         assert_eq!(spec.size_mb, 650);
         assert_eq!(
             spec.base_url,

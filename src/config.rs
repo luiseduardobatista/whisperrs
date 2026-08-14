@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn ai_model_path_resolves_catalog_and_direct_paths() {
-        let catalog_path = crate::model::models_dir().join("Qwen3.5-0.8B-Q5_K_M.gguf");
+        let catalog_path = crate::model::models_dir().join("Qwen_Qwen3.5-0.8B-Q5_K_M.gguf");
         let catalog_existed = catalog_path.exists();
         if !catalog_existed {
             std::fs::create_dir_all(catalog_path.parent().unwrap()).unwrap();
