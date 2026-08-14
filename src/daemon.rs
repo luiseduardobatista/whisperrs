@@ -4,6 +4,7 @@ use crate::audio::{self, Capture};
 use crate::config::{Config, InsertMode, config_mtime};
 use crate::insert;
 use crate::ipc::{self, Cmd, Response};
+use crate::model;
 use crate::osd::{OsdCommand, OsdEvent, Phase as UiPhase, UiState};
 use crate::postprocess;
 use crate::transcribe::Engine;
@@ -186,14 +187,7 @@ impl Daemon {
             return;
         }
         self.pending_engine_reload = false;
-        let cfg = self.cfg.clone();
-        let tx = self.events_tx.clone();
-        std::thread::spawn(move || {
-            let res = Engine::load(&cfg.model_path(), cfg.gpu_device, cfg.threads)
-                .map(Arc::new)
-                .map_err(|e| format!("{e:#}"));
-            let _ = tx.send(DaemonEvent::EngineLoaded(res));
-        });
+        spawn_engine_load(&self.cfg, &self.events_tx);
     }
 
     fn handle_cmd(&mut self, cmd: Cmd) -> Response {
@@ -309,13 +303,22 @@ impl Daemon {
     fn handle_engine_loaded(&mut self, res: Result<Arc<Engine>, String>) {
         match res {
             Ok(engine) => {
+                if !engine.vad_available() {
+                    eprintln!(
+                        "whisper: aviso: VAD indisponível — transcrevendo sem filtro de voz; \
+                               rode 'whisper setup' e reinicie o daemon"
+                    );
+                }
                 self.engine = Some(engine);
-                if self.phase == Phase::Loading {
-                    self.set_phase(Phase::Recording, None);
-                    self.start_capture();
-                } else if self.phase == Phase::Idle {
+                match self.phase {
+                    Phase::Loading => {
+                        self.refresh_warning();
+                        self.set_phase(Phase::Recording, None);
+                        self.start_capture();
+                    }
                     // Troca de modelo em background (hot reload da config).
-                    eprintln!("whisper: modelo recarregado");
+                    Phase::Idle => eprintln!("whisper: modelo recarregado"),
+                    _ => {}
                 }
             }
             Err(err) => {
@@ -331,18 +334,11 @@ impl Daemon {
     }
 
     fn start_session(&mut self) {
-        let mut ui = UiState::new(lang_model(&self.cfg));
-        // Aviso visível no OSD (rodapé do cartão): sem wtype o texto não é
-        // digitado na app focada e fica só no clipboard — o usuário vê antes
-        // de ditar, mesmo que o daemon tenha subido sem console.
-        if matches!(self.cfg.insert_mode, InsertMode::Type | InsertMode::Both)
-            && !insert::wtype_available()
-        {
-            ui.warning = Some(
-                "wtype ausente — a digitação na app não vai funcionar (só clipboard)".to_string(),
-            );
-        }
+        let ui = UiState::new(lang_model(&self.cfg));
         self.ui = Arc::new(Mutex::new(ui));
+        // Avisos no rodapé do cartão (wtype/VAD ausentes): o usuário vê antes
+        // de ditar, mesmo que o daemon tenha subido sem console.
+        self.refresh_warning();
         let (osd_tx, osd_rx) = channel();
         let (osd_ev_tx, osd_ev_rx) = channel::<OsdEvent>();
         let ui = self.ui.clone();
@@ -367,14 +363,7 @@ impl Daemon {
 
         if self.engine.is_none() {
             self.set_phase(Phase::Loading, Some("carregando modelo…".to_string()));
-            let cfg = self.cfg.clone();
-            let tx = self.events_tx.clone();
-            std::thread::spawn(move || {
-                let res = Engine::load(&cfg.model_path(), cfg.gpu_device, cfg.threads)
-                    .map(Arc::new)
-                    .map_err(|e| format!("{e:#}"));
-                let _ = tx.send(DaemonEvent::EngineLoaded(res));
-            });
+            spawn_engine_load(&self.cfg, &self.events_tx);
         } else {
             self.set_phase(Phase::Recording, None);
             self.start_capture();
@@ -466,6 +455,20 @@ impl Daemon {
         }
     }
 
+    /// Atualiza o aviso do rodapé do OSD conforme wtype/VAD disponíveis.
+    fn refresh_warning(&mut self) {
+        let wtype_missing = matches!(self.cfg.insert_mode, InsertMode::Type | InsertMode::Both)
+            && !insert::wtype_available();
+        let vad_missing = self
+            .engine
+            .as_ref()
+            .map(|e| !e.vad_available())
+            .unwrap_or(false);
+        if let Ok(mut ui) = self.ui.lock() {
+            ui.warning = compose_warning(wtype_missing, vad_missing);
+        }
+    }
+
     fn close_osd(&mut self) {
         if let Some(tx) = self.osd.take() {
             let _ = tx.send(OsdCommand::Close);
@@ -490,10 +493,11 @@ impl Daemon {
     }
 }
 
-fn transcribe_worker(engine: &Engine, mut samples: Vec<f32>, cfg: &Config) -> WorkerOutcome {
-    if cfg.trim_silence {
-        samples = postprocess::trim_silence(&samples, audio::SAMPLE_RATE, 0.01, 500, 300);
-    }
+fn transcribe_worker(engine: &Engine, samples: Vec<f32>, cfg: &Config) -> WorkerOutcome {
+    let samples = match engine.filter_speech(samples) {
+        Ok(s) => s,
+        Err(e) => return WorkerOutcome::Failed(format!("detecção de voz falhou: {e:#}")),
+    };
     if samples.is_empty() {
         return WorkerOutcome::Transcribed {
             text: String::new(),
@@ -513,6 +517,40 @@ fn transcribe_worker(engine: &Engine, mut samples: Vec<f32>, cfg: &Config) -> Wo
     // A inserção (wtype) fica com o daemon, DEPOIS que o OSD fechar: com o
     // OSD visível o foco de teclado é dele e as teclas não chegariam à app.
     WorkerOutcome::Transcribed { text }
+}
+
+/// Sobe o engine em background (primeira sessão ou hot reload da config).
+fn spawn_engine_load(cfg: &Config, tx: &Sender<DaemonEvent>) {
+    let cfg = cfg.clone();
+    let tx = tx.clone();
+    std::thread::spawn(move || {
+        let res = Engine::load(
+            &cfg.model_path(),
+            &model::vad_model_path(),
+            cfg.gpu_device,
+            cfg.threads,
+        )
+        .map(Arc::new)
+        .map_err(|e| format!("{e:#}"));
+        let _ = tx.send(DaemonEvent::EngineLoaded(res));
+    });
+}
+
+/// Compõe o aviso único do rodapé do OSD a partir das indisponibilidades de
+/// wtype (digitação) e VAD (filtro de voz); `None` quando nada falta.
+fn compose_warning(wtype_missing: bool, vad_missing: bool) -> Option<String> {
+    match (wtype_missing, vad_missing) {
+        (true, true) => {
+            Some("wtype ausente (só clipboard) · VAD ausente (sem filtro de voz)".to_string())
+        }
+        (true, false) => {
+            Some("wtype ausente — a digitação na app não vai funcionar (só clipboard)".to_string())
+        }
+        (false, true) => {
+            Some("VAD ausente — transcrevendo sem filtro de voz; rode whisper setup".to_string())
+        }
+        (false, false) => None,
+    }
 }
 
 #[cfg(test)]
@@ -536,5 +574,17 @@ mod tests {
         for (phase, expected) in cases {
             assert_eq!(phase.ui_phase(), Some(expected));
         }
+    }
+
+    #[test]
+    fn warning_composes_wtype_and_vad() {
+        assert_eq!(compose_warning(false, false), None);
+        let only_vad = compose_warning(false, true).unwrap();
+        assert!(only_vad.contains("VAD ausente"));
+        assert!(!only_vad.contains("wtype"));
+        let only_wtype = compose_warning(true, false).unwrap();
+        assert!(only_wtype.contains("wtype ausente"));
+        let both = compose_warning(true, true).unwrap();
+        assert!(both.contains("wtype ausente") && both.contains("VAD ausente"));
     }
 }

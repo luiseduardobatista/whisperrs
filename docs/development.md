@@ -14,10 +14,10 @@ nix develop --no-pure-eval   # alternativa via flake
 Dentro do shell:
 
 ```sh
-cargo build --release
-./target/release/whisper start
-./target/release/whisper status   # idle
-./target/release/whisper toggle   # sessão de ditado (precisa Wayland + mic)
+cargo build
+./target/debug/whisper start
+./target/debug/whisper status   # idle
+./target/debug/whisper toggle   # sessão de ditado (precisa Wayland + mic)
 ```
 
 Dependências de runtime (fora do shell): `pw-record` (PipeWire), `wtype`,
@@ -39,8 +39,8 @@ src/
   model.rs       # catálogo de modelos + download paralelo (HTTP Range)
   setup.rs       # wizard interativo (dialoguer)
   audio.rs       # captura pw-record (f32 mono 16 kHz)
-  transcribe.rs  # engine whisper.cpp (whisper-rs, Vulkan)
-  postprocess.rs # trim_silence, remove_fillers, fix_punctuation (puros)
+  transcribe.rs  # engine whisper.cpp (whisper-rs, Vulkan) + VAD residente
+  postprocess.rs # rms, remove_fillers, fix_punctuation (puros)
   osd.rs         # integração Wayland: superfícies, teclado e buffer SHM
   osd_draw.rs    # desenho puro do cartão (tiny-skia + ab_glyph)
   insert.rs      # inserção: wtype (digita) + wl-copy (clipboard)
@@ -83,7 +83,9 @@ Fluxo de uma sessão:
 2. `Space` alterna `Recording ⇄ Paused`. Chunks de áudio viram amostras no
    buffer + nível RMS para a waveform.
 3. `Enter` → `commit`: para a captura e manda o buffer para a thread worker
-   (trim_silence → whisper → remove_fillers → fix_punctuation).
+   (VAD → whisper → remove_fillers → fix_punctuation). O VAD (Silero, CPU)
+   extrai os segmentos de fala do buffer e concatena só eles — silêncio das
+   bordas e pausas longas não vão para o whisper.
 4. `handle_worker` agenda `pending_insert` e fecha o OSD imediatamente —
    sem preview do texto: ele aparece direto na app focada.
 5. Evento `Closed` (emitido pela thread do OSD ao sair, após flush do
@@ -94,6 +96,32 @@ Fluxo de uma sessão:
 OSD está visível ele segura o foco de teclado — `wtype` digitando antes
 escreveria no OSD, não na app. Não "otimize" isso.
 
+## VAD (transcribe.rs)
+
+O VAD (Silero via ggml, sem onnxruntime) é parte do `Engine`: carregado na
+mesma thread de inicialização e residente entre sessões. A API do whisper.cpp
+é batch — `whisper_vad_detect_speech` zera o estado LSTM a cada chamada —,
+então o uso é no commit, sobre o buffer completo (`segments_from_samples`),
+não em streaming. Como a API exige `&mut` e o `Engine` é compartilhado por
+`Arc`, o contexto fica em `Option<Mutex<WhisperVadContext>>` (`None` =
+modelo ausente/falho; nunca é opção de config).
+
+- Parâmetros: defaults do whisper.cpp (threshold 0.5, fala mín. 250 ms,
+  silêncio mín. 100 ms, pad 30 ms) — timestamps dos segmentos vêm em
+  **centésimos de segundo** e já incluem o pad; `concat_segments` (função
+  pura testada) converte para índices a 16 kHz (início arredonda para baixo,
+  fim para cima, clamp). O `samples_overlap` do whisper.cpp não é aplicado
+  no caminho standalone usado aqui (só no fluxo integrado do
+  `whisper_full_with_state`).
+- O VAD roda em CPU (o whisper.cpp força CPU nele) e não disputa a Vulkan
+  com o modelo de transcrição.
+- Falha de inferência (contexto carregado) é `Err` → erro de sessão;
+  ausência do modelo é degradação silenciosa com aviso no log/OSD; zero
+  segmentos é `Vec::new()` → fluxo "nada detectado".
+- O daemon **nunca baixa** o modelo VAD: `whisper setup` é quem instala
+  (`model::download`, idempotente); daemon ativo precisa reiniciar para
+  carregar um VAD recém-instalado.
+
 ## Hot reload
 
 - O loop principal compara o mtime do `config.toml` a cada tick (~1 s) em
@@ -103,13 +131,19 @@ escreveria no OSD, não na app. Não "otimize" isso.
 - Campos de sessão valem na próxima sessão; `model`/`gpu_device`/`threads`
   mudados marcam `pending_engine_reload`, e `reload_engine_if_pending`
   recarrega o engine em background quando o daemon está ocioso (falha
-  mantém o atual).
+  mantém o atual). O VAD não tem opção de config; instalar o modelo VAD com
+  o daemon ativo exige reiniciar o daemon para ser carregado.
 
 Ao adicionar uma opção nova em `config.rs` (com default), o hot reload a
 pega automaticamente; se ela afetar o engine, inclua-a na comparação de
 `reload_config_if_changed`.
 
 ## Download de modelos (model.rs)
+
+Dois repositórios HuggingFace, mesmo mecanismo: modelos whisper em
+`ggerganov/whisper.cpp` e o modelo VAD fixo (`ggml-silero-v6.2.0.bin`, ~865 KB)
+em `ggml-org/whisper-vad`; `ModelSpec.base_url` guarda a origem de cada um.
+O VAD fica fora de `MODELS` (não é selecionável no setup).
 
 - Probe com `Range: bytes=0-0`: `206` + `Content-Range` → download paralelo
   (até `MAX_CONNECTIONS=16` conexões, cada uma gravando seu intervalo com
@@ -132,19 +166,26 @@ pega automaticamente; se ela afetar o engine, inclua-a na comparação de
 ## Testing
 
 ```sh
-cargo test --release
+cargo test
 ```
 
-Cobertura: pós-processamento (trim/fillers/pontuação), parse de config e
-Content-Range, catálogo de modelos, smoke test do OSD, modo de inserção.
+Cobertura: pós-processamento (fillers/pontuação/RMS), parse de config e
+Content-Range, catálogo de modelos (inclui VAD), concatenação de segmentos
+do VAD, composição de avisos do OSD, smoke test do OSD, modo de inserção.
 
-Integração real (ignorada por padrão — precisa modelo e WAV):
+Integração real (ignorada por padrão — precisa modelo, VAD e WAV):
 
 ```sh
 WHISPER_MODEL=~/.local/share/whisper/models/ggml-tiny.bin \
+WHISPER_VAD_MODEL=~/.local/share/whisper/models/ggml-silero-v6.2.0.bin \
 WHISPER_WAV=/tmp/jfk.wav \
-cargo test --release transcribe_jfk -- --ignored
+cargo test transcribe_jfk vad_filters_real_audio -- --ignored
 ```
+
+`transcribe_jfk` usa um path de VAD inexistente (transcreve o buffer
+inteiro); `vad_filters_real_audio` valida o filtro real (fala presente,
+saída menor ou igual à entrada, transcrição não vazia). Senoide não serve
+como prova de fala para o VAD — só áudio real.
 
 ## Debugging
 

@@ -1,62 +1,14 @@
-//! Pós-processamento puro: corte de silêncio (antes de transcrever) e
-//! limpeza de texto (fillers, pontuação) depois da transcrição.
+//! Pós-processamento puro: medição de nível (waveform) e limpeza de texto
+//! (fillers, pontuação) depois da transcrição.
 use crate::config::Language;
 
-/// RMS de um bloco de amostras (para a waveform e detecção de silêncio).
+/// RMS de um bloco de amostras (para a waveform).
 pub fn rms(samples: &[f32]) -> f32 {
     if samples.is_empty() {
         return 0.0;
     }
     let sum: f32 = samples.iter().map(|s| s * s).sum();
     (sum / samples.len() as f32).sqrt()
-}
-
-/// Corta silêncio nas bordas e colapsa pausas internas mais longas que
-/// `max_gap_ms` para `collapse_to_ms`. Janela de análise: 30 ms.
-pub fn trim_silence(
-    samples: &[f32],
-    sample_rate: u32,
-    threshold: f32,
-    max_gap_ms: u64,
-    collapse_to_ms: u64,
-) -> Vec<f32> {
-    const WIN_MS: u64 = 30;
-    let win = ((sample_rate as u64 * WIN_MS / 1000) as usize).max(1);
-    let levels: Vec<f32> = samples.chunks(win).map(rms).collect();
-
-    let first = levels.iter().position(|l| *l >= threshold);
-    let last = levels.iter().rposition(|l| *l >= threshold);
-    let (Some(first), Some(last)) = (first, last) else {
-        return Vec::new();
-    };
-
-    let max_gap_wins = (max_gap_ms / WIN_MS).max(1) as usize;
-    let collapse_wins = (collapse_to_ms / WIN_MS).max(1) as usize;
-    let mut out = Vec::with_capacity(samples.len());
-
-    let mut i = first;
-    while i <= last {
-        if levels[i] >= threshold {
-            let start = i * win;
-            let end = ((i + 1) * win).min(samples.len());
-            out.extend_from_slice(&samples[start..end]);
-            i += 1;
-        } else {
-            let mut j = i;
-            while j <= last && levels[j] < threshold {
-                j += 1;
-            }
-            let gap = j - i;
-            if gap > max_gap_wins {
-                let keep = collapse_wins.min(gap);
-                let start = (i * win).min(samples.len());
-                let end = (start + keep * win).min(samples.len());
-                out.extend_from_slice(&samples[start..end]);
-            }
-            i = j;
-        }
-    }
-    out
 }
 
 /// Marcadores de fala (filler words) por língua, checados com caixa
@@ -149,41 +101,6 @@ mod tests {
         let s = sine(440.0, 16_000, 0.1, 0.5);
         let r = rms(&s);
         assert!((r - 0.5 / 2f32.sqrt()).abs() < 0.02, "rms = {r}");
-    }
-
-    #[test]
-    fn trim_removes_edge_silence() {
-        let mut s = vec![0.0; 16_000]; // 1s de silêncio
-        s.extend(sine(440.0, 16_000, 0.5, 0.3));
-        s.extend(vec![0.0; 8_000]); // 0.5s de silêncio
-        let out = trim_silence(&s, 16_000, 0.01, 500, 300);
-        let first = out.iter().position(|v| v.abs() > 0.01);
-        let last = out.iter().rposition(|v| v.abs() > 0.01);
-        assert!(first.is_some());
-        assert!(last.is_some());
-        // bordas cortadas
-        assert!(out.len() < s.len());
-        // nenhuma amostra forte perdida
-        let strong = s.iter().filter(|v| v.abs() > 0.01).count();
-        let strong_out = out.iter().filter(|v| v.abs() > 0.01).count();
-        assert_eq!(strong, strong_out);
-    }
-
-    #[test]
-    fn trim_collapses_long_internal_pause() {
-        let mut s = sine(440.0, 16_000, 0.3, 0.3);
-        s.extend(vec![0.0; 16_000]); // 1s de pausa
-        s.extend(sine(440.0, 16_000, 0.3, 0.3));
-        let out = trim_silence(&s, 16_000, 0.01, 500, 300);
-        // pausa colapsada: saída bem menor que a entrada
-        assert!(out.len() < 16_000, "saída {} >= 1s", out.len());
-        // ainda contém as duas falas
-        assert!(out.iter().filter(|v| v.abs() > 0.01).count() >= 9_000);
-    }
-
-    #[test]
-    fn trim_all_silence_returns_empty() {
-        assert!(trim_silence(&vec![0.0; 16_000], 16_000, 0.01, 500, 300).is_empty());
     }
 
     #[test]
