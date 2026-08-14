@@ -3,6 +3,7 @@ use crate::config::{Config, InsertMode, Language};
 use crate::insert;
 use crate::model;
 use anyhow::{Result, bail};
+use dialoguer::Confirm;
 use dialoguer::Select;
 use dialoguer::theme::ColorfulTheme;
 use std::path::Path;
@@ -79,7 +80,29 @@ pub fn run(
         downloaded_anything |= downloaded;
         Some((name.to_string(), dest))
     } else {
-        None
+        let spec = model::LLM_MODELS.first().expect("catálogo LLM não vazio");
+        let dest = model::models_dir().join(spec.file);
+        if dest.exists() {
+            // Já instalado: não pergunta de novo, só garante o nome no config.
+            Some((spec.name.to_string(), dest))
+        } else {
+            // Sem flag, o wizard pergunta ao final (default: não). Sem TTY,
+            // o `None` do interact_opt pula o Qwen sem quebrar usos scriptados.
+            let want = Confirm::with_theme(&ColorfulTheme::default())
+                .with_prompt(
+                    "Baixar o modelo Qwen (~650 MB) para pós-processamento inteligente (opcional)?",
+                )
+                .default(false)
+                .interact_opt()?
+                .unwrap_or(false);
+            if want {
+                let downloaded = ensure_downloaded(spec, &dest, "modelo Qwen")?;
+                downloaded_anything |= downloaded;
+                Some((spec.name.to_string(), dest))
+            } else {
+                None
+            }
+        }
     };
 
     let mut cfg = Config::load()?;

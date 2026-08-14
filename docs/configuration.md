@@ -90,7 +90,8 @@ Multilíngues, oficiais do whisper.cpp (HuggingFace), baixados para
 | `turbo` | `ggml-large-v3-turbo.bin` | 1,6 GB |
 
 O `whisper setup` baixa o modelo escolhido **e** o modelo VAD (fixo). Com
-`--ai-model qwen3.5-0.8b`, baixa também o GGUF do Qwen; o daemon nunca baixa
+`--ai-model qwen3.5-0.8b` (ou respondendo "sim" à pergunta do wizard), baixa
+também o GGUF do Qwen; o daemon nunca baixa
 modelos. O modelo de transcrição é carregado na primeira sessão de ditado e
 fica residente em VRAM até o daemon parar. Os downloads usam **conexões
 paralelas** (HTTP Range,

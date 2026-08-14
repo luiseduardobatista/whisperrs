@@ -32,7 +32,8 @@ ativa (captura e OSD), responde `stopping`, remove o socket e sai.
 
 `whisper setup` é um wizard interativo de língua e modelo; flags `--lang` e
 `--model` pulam a interação. `--ai-model qwen3.5-0.8b` baixa o GGUF Qwen e o
-ativa no catálogo, sem alterar `ai.enabled`; o modelo é carregado sob demanda.
+ativa no catálogo, sem alterar `ai.enabled`; sem a flag, o wizard pergunta ao
+final se deseja baixá-lo (default: não). O modelo é carregado sob demanda.
 Baixa os modelos (se ainda não existirem) e salva
 `~/.config/whisper/config.toml`. O download usa **conexões paralelas** (HTTP
 Range, até 16, como o aria2c `-x 16`) para aproveitar a banda; falha remove o

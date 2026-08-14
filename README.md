@@ -105,7 +105,8 @@ Referência completa de opções, modelos e download:
 [docs/configuration.md](docs/configuration.md).
 
 Para usar o pós-processamento Qwen, instale o modelo com
-`whisper setup --ai-model qwen3.5-0.8b` e mantenha `llama-server` no PATH:
+`whisper setup --ai-model qwen3.5-0.8b` (ou responda "sim" à pergunta do
+setup) e mantenha `llama-server` no PATH:
 
 ```toml
 [ai]
