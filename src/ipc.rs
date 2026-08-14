@@ -1,5 +1,5 @@
 //! Protocolo de IPC entre o CLI e o daemon: socket Unix + JSON por linha.
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -20,7 +20,6 @@ pub struct Request {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Response {
-    pub ok: bool,
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -31,7 +30,6 @@ pub struct Response {
     pub exe: Option<String>,
 }
 
-/// Envia um comando ao daemon e aguarda a resposta (lado CLI).
 pub fn request(cmd: Cmd) -> Result<Response> {
     let path = crate::config::socket_path();
     let mut stream = UnixStream::connect(&path)
@@ -56,13 +54,17 @@ where
         }
         std::fs::remove_file(&path)?; // socket órfão de uma execução anterior
     }
-    let listener = UnixListener::bind(&path)
-        .with_context(|| format!("bindando socket {}", path.display()))?;
+    let listener =
+        UnixListener::bind(&path).with_context(|| format!("bindando socket {}", path.display()))?;
     for conn in listener.incoming() {
         let Ok(stream) = conn else { continue };
         let handler = std::sync::Arc::clone(&handler);
         std::thread::spawn(move || {
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut stream = stream;
+            let Ok(clone) = stream.try_clone() else {
+                return;
+            };
+            let mut reader = BufReader::new(clone);
             let mut line = String::new();
             if reader.read_line(&mut line).is_err() {
                 return;
@@ -73,8 +75,10 @@ where
             let (reply_tx, reply_rx) = std::sync::mpsc::channel();
             handler(req.cmd, reply_tx);
             if let Ok(resp) = reply_rx.recv() {
-                let mut stream = stream;
-                let _ = writeln!(stream, "{}", serde_json::to_string(&resp).unwrap());
+                let Ok(json) = serde_json::to_string(&resp) else {
+                    return;
+                };
+                let _ = writeln!(stream, "{json}");
             }
         });
     }
@@ -86,7 +90,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resposta_de_daemon_antigo_sem_exe() {
+    fn old_daemon_response_without_exe() {
         // Compatibilidade: daemon de versão anterior não envia `exe` — o
         // campo deve desserializar como None (e o CLI reinicia o daemon).
         let resp: Response = serde_json::from_str(r#"{"ok":true,"state":"idle"}"#).unwrap();
@@ -94,9 +98,8 @@ mod tests {
     }
 
     #[test]
-    fn exe_serializa_e_roundtrip() {
+    fn exe_serializes_and_roundtrips() {
         let resp = Response {
-            ok: true,
             state: "idle".to_string(),
             error: None,
             exe: Some("/nix/store/x-whisper/bin/.whisper-wrapped".to_string()),
@@ -104,6 +107,9 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"exe\":\"/nix/store/x-whisper/bin/.whisper-wrapped\""));
         let back: Response = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.exe.as_deref(), Some("/nix/store/x-whisper/bin/.whisper-wrapped"));
+        assert_eq!(
+            back.exe.as_deref(),
+            Some("/nix/store/x-whisper/bin/.whisper-wrapped")
+        );
     }
 }

@@ -1,14 +1,14 @@
 //! Daemon: orquestra as sessões de ditado — estado, áudio (pw-record),
 //! OSD (teclas), transcrição (whisper-rs) e inserção (wtype/wl-copy).
 use crate::audio::{self, Capture};
-use crate::config::{config_mtime, Config, InsertMode};
+use crate::config::{Config, InsertMode, config_mtime};
 use crate::insert;
 use crate::ipc::{self, Cmd, Response};
 use crate::osd::{OsdCommand, OsdEvent, Phase as UiPhase, UiState};
 use crate::postprocess;
 use crate::transcribe::Engine;
 use anyhow::Result;
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -19,6 +19,18 @@ enum Phase {
     Paused,
     Transcribing,
     Loading,
+}
+
+impl Phase {
+    fn ui_phase(self) -> Option<UiPhase> {
+        match self {
+            Phase::Idle => None,
+            Phase::Recording => Some(UiPhase::Recording),
+            Phase::Paused => Some(UiPhase::Paused),
+            Phase::Transcribing => Some(UiPhase::Transcribing),
+            Phase::Loading => Some(UiPhase::Loading),
+        }
+    }
 }
 
 struct AudioChunk {
@@ -96,8 +108,7 @@ pub fn run() -> Result<()> {
 /// Avisa (no stderr → daemon.log) se o wtype faltar no PATH quando o modo de
 /// inserção depende dele: a digitação na app vai falhar e sobra só o clipboard.
 fn warn_if_wtype_missing(cfg: &Config) {
-    if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both)
-        && !insert::wtype_available()
+    if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both) && !insert::wtype_available()
     {
         eprintln!(
             "whisper: aviso: wtype não encontrado no PATH — a digitação na app focada vai \
@@ -120,10 +131,8 @@ impl Daemon {
                 Ok(ev) => match ev {
                     DaemonEvent::Ipc(cmd, reply) => {
                         if matches!(cmd, Cmd::Stop) {
-                            // Encerra sessão ativa (captura/OSD) e sai do loop.
                             self.cancel_session();
                             let _ = reply.send(Response {
-                                ok: true,
                                 state: "stopping".to_string(),
                                 error: None,
                                 exe: None,
@@ -200,7 +209,6 @@ impl Daemon {
             Cmd::Stop => {} // interceptado no loop_forever antes de chegar aqui
         }
         let mut resp = Response {
-            ok: true,
             state: self.state_str().to_string(),
             error: None,
             exe: None,
@@ -229,14 +237,8 @@ impl Daemon {
     fn handle_osd(&mut self, ev: OsdEvent) {
         match ev {
             OsdEvent::PauseToggle => match self.phase {
-                Phase::Recording => {
-                    self.phase = Phase::Paused;
-                    self.set_ui(UiPhase::Paused, None);
-                }
-                Phase::Paused => {
-                    self.phase = Phase::Recording;
-                    self.set_ui(UiPhase::Recording, None);
-                }
+                Phase::Recording => self.set_phase(Phase::Paused, None),
+                Phase::Paused => self.set_phase(Phase::Recording, None),
                 _ => {}
             },
             OsdEvent::Commit => self.commit(),
@@ -245,8 +247,10 @@ impl Daemon {
                 if let Some(text) = self.pending_insert.take() {
                     // OSD fechado: o foco voltou à app, agora digita.
                     if let Err(e) = insert::insert(&text, self.cfg.insert_mode) {
-                        // Em modo both o texto já está no clipboard.
-                        eprintln!("whisper: inserção falhou (texto no clipboard): {e}");
+                        // O insert detalha a falha e avisa quando o texto
+                        // sobrou no clipboard (modo both); a sessão encerra
+                        // do mesmo jeito.
+                        eprintln!("whisper: inserção falhou: {e}");
                     }
                     self.finish_session(None);
                 } else {
@@ -307,8 +311,7 @@ impl Daemon {
             Ok(engine) => {
                 self.engine = Some(engine);
                 if self.phase == Phase::Loading {
-                    self.phase = Phase::Recording;
-                    self.set_ui(UiPhase::Recording, None);
+                    self.set_phase(Phase::Recording, None);
                     self.start_capture();
                 } else if self.phase == Phase::Idle {
                     // Troca de modelo em background (hot reload da config).
@@ -363,8 +366,7 @@ impl Daemon {
         self.buffer.clear();
 
         if self.engine.is_none() {
-            self.phase = Phase::Loading;
-            self.set_ui(UiPhase::Loading, Some("carregando modelo…".to_string()));
+            self.set_phase(Phase::Loading, Some("carregando modelo…".to_string()));
             let cfg = self.cfg.clone();
             let tx = self.events_tx.clone();
             std::thread::spawn(move || {
@@ -374,8 +376,7 @@ impl Daemon {
                 let _ = tx.send(DaemonEvent::EngineLoaded(res));
             });
         } else {
-            self.phase = Phase::Recording;
-            self.set_ui(UiPhase::Recording, None);
+            self.set_phase(Phase::Recording, None);
             self.start_capture();
         }
     }
@@ -390,7 +391,10 @@ impl Daemon {
                     loop {
                         match audio::read_chunk(&mut stdout) {
                             Ok((samples, rms)) if !samples.is_empty() => {
-                                if tx.send(DaemonEvent::Audio(AudioChunk { samples, rms })).is_err() {
+                                if tx
+                                    .send(DaemonEvent::Audio(AudioChunk { samples, rms }))
+                                    .is_err()
+                                {
                                     break;
                                 }
                             }
@@ -426,12 +430,13 @@ impl Daemon {
         let engine = match &self.engine {
             Some(e) => Arc::clone(e),
             None => {
-                self.finish_session(Some("modelo não carregado: rode 'whisper setup'".to_string()));
+                self.finish_session(Some(
+                    "modelo não carregado: rode 'whisper setup'".to_string(),
+                ));
                 return;
             }
         };
-        self.phase = Phase::Transcribing;
-        self.set_ui(UiPhase::Transcribing, Some("transcrevendo…".to_string()));
+        self.set_phase(Phase::Transcribing, Some("transcrevendo…".to_string()));
         let samples = std::mem::take(&mut self.buffer);
         let cfg = self.cfg.clone();
         let tx = self.events_tx.clone();
@@ -444,6 +449,13 @@ impl Daemon {
     fn stop_capture(&mut self) {
         if let Some(mut capture) = self.capture.take() {
             capture.stop();
+        }
+    }
+
+    fn set_phase(&mut self, phase: Phase, status: Option<String>) {
+        self.phase = phase;
+        if let Some(ui_phase) = phase.ui_phase() {
+            self.set_ui(ui_phase, status);
         }
     }
 
@@ -478,14 +490,14 @@ impl Daemon {
     }
 }
 
-/// Pipeline de transcrição (roda na thread de trabalho):
-/// corta silêncio → whisper → fillers → pontuação → insere na app.
 fn transcribe_worker(engine: &Engine, mut samples: Vec<f32>, cfg: &Config) -> WorkerOutcome {
     if cfg.trim_silence {
         samples = postprocess::trim_silence(&samples, audio::SAMPLE_RATE, 0.01, 500, 300);
     }
     if samples.is_empty() {
-        return WorkerOutcome::Transcribed { text: String::new() };
+        return WorkerOutcome::Transcribed {
+            text: String::new(),
+        };
     }
     let raw = match engine.transcribe(&samples, cfg.language.whisper_code()) {
         Ok(text) => text,
@@ -501,4 +513,28 @@ fn transcribe_worker(engine: &Engine, mut samples: Vec<f32>, cfg: &Config) -> Wo
     // A inserção (wtype) fica com o daemon, DEPOIS que o OSD fechar: com o
     // OSD visível o foco de teclado é dele e as teclas não chegariam à app.
     WorkerOutcome::Transcribed { text }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_has_no_ui_phase() {
+        assert_eq!(Phase::Idle.ui_phase(), None);
+    }
+
+    #[test]
+    fn active_phases_map_to_their_ui_phase() {
+        let cases = [
+            (Phase::Recording, UiPhase::Recording),
+            (Phase::Paused, UiPhase::Paused),
+            (Phase::Transcribing, UiPhase::Transcribing),
+            (Phase::Loading, UiPhase::Loading),
+        ];
+
+        for (phase, expected) in cases {
+            assert_eq!(phase.ui_phase(), Some(expected));
+        }
+    }
 }

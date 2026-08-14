@@ -6,11 +6,12 @@ mod insert;
 mod ipc;
 mod model;
 mod osd;
+mod osd_draw;
 mod postprocess;
 mod setup;
 mod transcribe;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use std::fs::OpenOptions;
 use std::os::unix::process::CommandExt;
@@ -19,7 +20,11 @@ use std::process::{Command as Proc, Stdio};
 use crate::config::{Config, InsertMode};
 
 #[derive(Parser)]
-#[command(name = "whisper", version, about = "Ditado por voz com whisper.cpp + Vulkan")]
+#[command(
+    name = "whisper",
+    version,
+    about = "Ditado por voz com whisper.cpp + Vulkan"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Command,
@@ -77,18 +82,15 @@ fn start() -> Result<()> {
     let exe = std::env::current_exe().context("localizando o próprio executável")?;
     // Um daemon de outra origem (ex.: build de dev sem o wrapper do flake)
     // não tem wtype no PATH — a digitação quebraria. Diferente → reinicia.
-    match ipc::request(ipc::Cmd::Status) {
-        Ok(resp) => {
-            let mesmo = resp.exe.as_deref() == exe.to_str();
-            if mesmo {
-                println!("whisper já está rodando");
-                return Ok(());
-            }
-            println!("daemon de outra origem — reiniciando com este binário");
-            let _ = ipc::request(ipc::Cmd::Stop);
-            wait_daemon_exit()?;
+    if let Ok(resp) = ipc::request(ipc::Cmd::Status) {
+        let same = resp.exe.as_deref() == exe.to_str();
+        if same {
+            println!("whisper já está rodando");
+            return Ok(());
         }
-        Err(_) => {} // sem daemon: segue para subir
+        println!("daemon de outra origem — reiniciando com este binário");
+        let _ = ipc::request(ipc::Cmd::Stop);
+        wait_daemon_exit()?;
     }
     let log = crate::config::log_path();
     if let Some(parent) = log.parent() {
@@ -115,7 +117,10 @@ fn start() -> Result<()> {
             if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both)
                 && !insert::wtype_available()
             {
-                println!("aviso: wtype não encontrado no PATH — {}", insert::wtype_hint());
+                println!(
+                    "aviso: wtype não encontrado no PATH — {}",
+                    insert::wtype_hint()
+                );
             }
             return Ok(());
         }
@@ -133,7 +138,10 @@ fn wait_daemon_exit() -> Result<()> {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    bail!("daemon antigo não saiu após o stop; verifique o log: {}", crate::config::log_path().display())
+    bail!(
+        "daemon antigo não saiu após o stop; verifique o log: {}",
+        crate::config::log_path().display()
+    )
 }
 
 fn print_response(resp: &ipc::Response) {

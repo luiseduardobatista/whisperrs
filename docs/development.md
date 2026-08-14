@@ -41,7 +41,8 @@ src/
   audio.rs       # captura pw-record (f32 mono 16 kHz)
   transcribe.rs  # engine whisper.cpp (whisper-rs, Vulkan)
   postprocess.rs # trim_silence, remove_fillers, fix_punctuation (puros)
-  osd.rs         # OSD wlr-layer-shell (tiny-skia + ab_glyph)
+  osd.rs         # integração Wayland: superfícies, teclado e buffer SHM
+  osd_draw.rs    # desenho puro do cartão (tiny-skia + ab_glyph)
   insert.rs      # inserção: wtype (digita) + wl-copy (clipboard)
 ```
 
@@ -61,9 +62,10 @@ O daemon é um loop de eventos sem async: tudo é `std::thread` + canais
 
 - Socket: `$XDG_RUNTIME_DIR/whisper.sock`, JSON por linha.
 - Request: `{ "cmd": "toggle" | "status" | "stop" }`.
-- Response: `{ "ok": bool, "state": str, "error": str|null, "exe": str|null }`
+- Response: `{ "state": str, "error": str|null, "exe": str|null }`
   — `exe` (só em `status`) é o caminho do binário do daemon; ausente em
-  daemons de versões antigas.
+  daemons de versões antigas (campos desconhecidos do lado antigo são
+  ignorados na desserialização).
 - Socket órfão é removido na subida; um segundo daemon sai com erro (exit 1)
   em vez de ficar ocioso.
 
@@ -151,7 +153,8 @@ cargo test --release transcribe_jfk -- --ignored
 - `whisper daemon` em primeiro plano mostra stderr ao vivo (hot reload,
   erros de engine, falhas de inserção).
 - Falha de inserção não é visível no OSD (já fechado): olhe o
-  `daemon.log` ("inserção falhou (texto no clipboard)").
+  `daemon.log` (`inserção falhou: ...`); quando a cópia funcionar apesar da
+  digitação, o erro avisa que o texto ficou no clipboard.
 - `whisper status` mostra também o binário do daemon (`daemon: ...`) — se
   ele não for o esperado, `whisper start` já reinicia com o binário atual.
 - Se `wtype` estiver ausente do PATH, `whisper start` avisa no console e o
@@ -165,5 +168,5 @@ cargo test --release transcribe_jfk -- --ignored
 - Erros: `anyhow` com `context` em pt-BR.
 - Caminhos XDG sempre via helpers de `config.rs` (nunca hardcode).
 - UI do OSD: estado compartilhado `Arc<Mutex<UiState>>` — o daemon escreve,
-  o OSD lê por frame; desenho com tiny-skia (fonte DejaVu embutida em
-  `assets/`).
+  o OSD lê por frame; `osd_draw.rs` desenha com tiny-skia direto no buffer
+  SHM (fonte DejaVu embutida em `assets/`).

@@ -79,7 +79,7 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
-    fn le_blocos_f32_do_pipe() {
+    fn reads_f32_chunks_from_pipe() {
         let bytes: Vec<u8> = [1.0f32, 0.5, -0.5, 0.0]
             .iter()
             .flat_map(|v| v.to_le_bytes())
@@ -90,14 +90,14 @@ mod tests {
     }
 
     #[test]
-    fn eof_retorna_vazio() {
+    fn eof_returns_empty() {
         let mut cur = Cursor::new(Vec::<u8>::new());
         let (samples, _) = read_chunk(&mut cur).unwrap();
         assert!(samples.is_empty());
     }
 
     #[test]
-    fn bytes_parciais_nao_quebram() {
+    fn partial_bytes_do_not_break() {
         let mut bytes = 1.0f32.to_le_bytes().to_vec();
         bytes.push(0xAB); // byte solto
         let mut cur = Cursor::new(bytes);
