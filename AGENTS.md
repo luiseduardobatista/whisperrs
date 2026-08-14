@@ -14,10 +14,11 @@ Ditado por voz em Rust para Linux/Wayland: `pw-record` captura, whisper.cpp
 
 ```sh
 devenv shell                 # ambiente de dev (build com cargo, não com nix)
-cargo build --release
+cargo build
 cargo test
-./target/release/whisper start | status | stop | toggle
+./target/debug/whisper start | status | stop | toggle
 ```
+Não usar --release durante desenvolvimento
 
 Log do daemon: `~/.local/state/whisper/daemon.log`. Config:
 `~/.config/whisper/config.toml` (hot reload ~1 s, sem reiniciar o daemon).
