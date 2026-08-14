@@ -6,6 +6,7 @@
     cargo rustc clippy
     cmake clang pkg-config glslang libclang shaderc
     libxkbcommon vulkan-headers vulkan-loader wayland
+    llama-cpp-vulkan # llama-server para o pós-processamento Qwen (opcional)
   ];
 
   # bindgen (whisper-rs-sys) procura o libclang em LIBCLANG_PATH; o runtime

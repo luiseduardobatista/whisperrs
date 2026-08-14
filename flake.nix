@@ -56,7 +56,7 @@
         '';
         postInstall = ''
           wrapProgram $out/bin/whisper \
-            --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.wtype pkgs.wl-clipboard ]}" \
+            --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.wtype pkgs.wl-clipboard pkgs.llama-cpp-vulkan ]}" \
             --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath [ pkgs.libxkbcommon pkgs.vulkan-loader ]}"
         '';
       };

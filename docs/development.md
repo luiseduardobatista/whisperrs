@@ -22,11 +22,11 @@ cargo build
 
 Dependências de runtime (fora do shell): `pw-record` (PipeWire), `wtype`,
 `wl-copy`, driver Vulkan e, opcionalmente, `llama-server` (llama.cpp ≥ b7973)
-no PATH. O pacote do flake (`nix build .#default`) já inclui `wtype` e
-`wl-copy` no PATH via wrapper; `llama-server` não é obrigatório nem precisa
-estar no Nix. Instalando por outros meios, instale os programas no sistema —
-o app avisa (console, log e rodapé do OSD) se `wtype` ou Qwen estiverem
-indisponíveis. O stderr do daemon em background vai para
+no PATH. O pacote do flake (`nix build .#default`) já inclui `wtype`,
+`wl-copy` e `llama-server` (`llama-cpp-vulkan`) no PATH via wrapper — quem
+instala por outros meios instala os programas no sistema —; o app avisa
+(console, log e rodapé do OSD) se `wtype` ou Qwen estiverem indisponíveis.
+O stderr do daemon em background vai para
 `~/.local/state/whisper/daemon.log`; para ver logs ao vivo, rode `whisper
 daemon` em primeiro plano.
 
