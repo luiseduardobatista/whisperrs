@@ -49,6 +49,7 @@ pub enum Phase {
     Paused,
     Transcribing,
     Loading,
+    Cleaning,
     Error,
 }
 
@@ -106,6 +107,8 @@ struct App {
     kind: SurfaceKind,
     pool: SlotPool,
     scale: u32,
+    /// Largura lógica confirmada pelo compositor para centralizar a cápsula.
+    surface_width: u32,
     configured: bool,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     modifiers: Modifiers,
@@ -161,7 +164,7 @@ pub fn run(
             layer.set_anchor(Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
             layer.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
             layer.set_size(0, CARD_H as u32);
-            layer.set_margin(0, 0, 24, 0);
+            layer.set_margin(0, 0, 16, 0);
             layer.commit();
             SurfaceKind::Layer(layer)
         }
@@ -177,7 +180,13 @@ pub fn run(
         }
     };
 
-    let pool = SlotPool::new(8 * 1920 * (CARD_H as usize) * 4, &shm).context("pool shm")?;
+    // Reserva margem para telas 4K/8K e escalas HiDPI sem deixar o OSD
+    // invisível quando houver mais de um buffer em voo.
+    let pool = SlotPool::new(8 * 8192 * (CARD_H as usize) * 4, &shm).context("pool shm")?;
+    let surface_width = match &kind {
+        SurfaceKind::Layer(_) => 1920,
+        SurfaceKind::Window(_) => CARD_W as u32,
+    };
 
     let mut app = App {
         registry_state: RegistryState::new(&globals),
@@ -187,6 +196,7 @@ pub fn run(
         kind,
         pool,
         scale: 1,
+        surface_width,
         configured: false,
         keyboard: None,
         modifiers: Modifiers::default(),
@@ -443,13 +453,18 @@ impl LayerShellHandler for App {
         _conn: &Connection,
         qh: &QueueHandle<Self>,
         _layer: &LayerSurface,
-        _configure: LayerSurfaceConfigure,
+        configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
+        if configure.new_size.0 > 0 {
+            // O wlr-layer-shell entrega a largura em pixels do buffer; o
+            // desenho trabalha em coordenadas lógicas antes do scale.
+            self.surface_width = configure.new_size.0.div_ceil(self.scale.max(1));
+        }
         if !self.configured {
             self.configured = true;
-            self.draw(qh);
         }
+        self.draw(qh);
     }
 }
 
@@ -463,26 +478,30 @@ impl WindowHandler for App {
         _conn: &Connection,
         qh: &QueueHandle<Self>,
         _window: &Window,
-        _configure: WindowConfigure,
+        configure: WindowConfigure,
         _serial: u32,
     ) {
+        if let Some(width) = configure.new_size.0 {
+            self.surface_width = width.get();
+        }
         if !self.configured {
             self.configured = true;
-            self.draw(qh);
         }
+        self.draw(qh);
     }
 }
 
 impl App {
     fn draw(&mut self, _qh: &QueueHandle<Self>) {
         let s = self.scale as i32;
-        let w = 1920 * s;
+        let w = self.surface_width as i32 * s;
         let h = CARD_H as i32 * s;
         let stride = w * 4;
         let Ok((buffer, canvas)) = self
             .pool
             .create_buffer(w, h, stride, wl_shm::Format::Argb8888)
         else {
+            eprintln!("whisper: pool SHM sem espaço para o frame do OSD ({w}x{h})");
             return;
         };
         let Some(mut pix) = PixmapMut::from_bytes(canvas, w as u32, h as u32) else {
