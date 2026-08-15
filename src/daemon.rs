@@ -35,6 +35,48 @@ impl Phase {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommandAction {
+    Start,
+    Resume,
+    Commit,
+    Cancel,
+    Pause,
+    Noop,
+}
+
+fn command_action(phase: Phase, cmd: Cmd) -> CommandAction {
+    match cmd {
+        Cmd::Toggle => match phase {
+            Phase::Idle => CommandAction::Start,
+            Phase::Recording | Phase::Paused => CommandAction::Commit,
+            Phase::Loading | Phase::Transcribing => CommandAction::Noop,
+        },
+        Cmd::Record => match phase {
+            Phase::Idle => CommandAction::Start,
+            Phase::Paused => CommandAction::Resume,
+            Phase::Recording | Phase::Loading | Phase::Transcribing => CommandAction::Noop,
+        },
+        Cmd::Commit => match phase {
+            Phase::Recording | Phase::Paused => CommandAction::Commit,
+            Phase::Idle | Phase::Loading | Phase::Transcribing => CommandAction::Noop,
+        },
+        Cmd::Cancel => match phase {
+            Phase::Recording | Phase::Paused | Phase::Loading | Phase::Transcribing => {
+                CommandAction::Cancel
+            }
+            Phase::Idle => CommandAction::Noop,
+        },
+        Cmd::Pause => match phase {
+            Phase::Recording => CommandAction::Pause,
+            Phase::Idle | Phase::Paused | Phase::Loading | Phase::Transcribing => {
+                CommandAction::Noop
+            }
+        },
+        Cmd::Status | Cmd::Stop => CommandAction::Noop,
+    }
+}
+
 struct AudioChunk {
     samples: Vec<f32>,
     rms: f32,
@@ -234,16 +276,13 @@ impl Daemon {
     }
 
     fn handle_cmd(&mut self, cmd: Cmd) -> Response {
-        match cmd {
-            Cmd::Toggle => {
-                if self.phase == Phase::Idle {
-                    self.start_session();
-                } else {
-                    self.cancel_session();
-                }
-            }
-            Cmd::Status => {}
-            Cmd::Stop => {} // interceptado no loop_forever antes de chegar aqui
+        match command_action(self.phase, cmd) {
+            CommandAction::Start => self.start_session(),
+            CommandAction::Resume => self.set_phase(Phase::Recording, None),
+            CommandAction::Commit => self.commit(),
+            CommandAction::Cancel => self.cancel_session(),
+            CommandAction::Pause => self.set_phase(Phase::Paused, None),
+            CommandAction::Noop => {}
         }
         let mut resp = Response {
             state: self.state_str().to_string(),
@@ -556,7 +595,7 @@ impl Daemon {
     fn cancel_session(&mut self) {
         self.stop_capture();
         self.close_osd();
-        self.pending_insert = None; // Esc/toggle descarta a inserção pendente
+        self.pending_insert = None;
         self.phase = Phase::Idle;
     }
 
@@ -721,6 +760,51 @@ mod tests {
 
         for (phase, expected) in cases {
             assert_eq!(phase.ui_phase(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn toggle_follows_the_global_shortcut_session_flow() {
+        let cases = [
+            (Phase::Idle, CommandAction::Start),
+            (Phase::Recording, CommandAction::Commit),
+            (Phase::Paused, CommandAction::Commit),
+            (Phase::Loading, CommandAction::Noop),
+            (Phase::Transcribing, CommandAction::Noop),
+        ];
+
+        for (phase, expected) in cases {
+            assert_eq!(command_action(phase, Cmd::Toggle), expected);
+        }
+    }
+
+    #[test]
+    fn explicit_session_commands_only_allow_valid_transitions() {
+        let cases = [
+            (Phase::Idle, Cmd::Record, CommandAction::Start),
+            (Phase::Paused, Cmd::Record, CommandAction::Resume),
+            (Phase::Recording, Cmd::Record, CommandAction::Noop),
+            (Phase::Loading, Cmd::Record, CommandAction::Noop),
+            (Phase::Transcribing, Cmd::Record, CommandAction::Noop),
+            (Phase::Recording, Cmd::Commit, CommandAction::Commit),
+            (Phase::Paused, Cmd::Commit, CommandAction::Commit),
+            (Phase::Idle, Cmd::Commit, CommandAction::Noop),
+            (Phase::Loading, Cmd::Commit, CommandAction::Noop),
+            (Phase::Transcribing, Cmd::Commit, CommandAction::Noop),
+            (Phase::Idle, Cmd::Cancel, CommandAction::Noop),
+            (Phase::Recording, Cmd::Cancel, CommandAction::Cancel),
+            (Phase::Paused, Cmd::Cancel, CommandAction::Cancel),
+            (Phase::Loading, Cmd::Cancel, CommandAction::Cancel),
+            (Phase::Transcribing, Cmd::Cancel, CommandAction::Cancel),
+            (Phase::Recording, Cmd::Pause, CommandAction::Pause),
+            (Phase::Idle, Cmd::Pause, CommandAction::Noop),
+            (Phase::Paused, Cmd::Pause, CommandAction::Noop),
+            (Phase::Loading, Cmd::Pause, CommandAction::Noop),
+            (Phase::Transcribing, Cmd::Pause, CommandAction::Noop),
+        ];
+
+        for (phase, cmd, expected) in cases {
+            assert_eq!(command_action(phase, cmd), expected);
         }
     }
 

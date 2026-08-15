@@ -39,8 +39,11 @@ enum Command {
     Stop,
     /// Sobe o daemon em primeiro plano (debug / systemd user service).
     Daemon,
-    /// Inicia uma sessão de ditado; ativo = cancela (bind no compositor).
     Toggle,
+    Record,
+    Commit,
+    Cancel,
+    Pause,
     /// Mostra o estado do daemon.
     Status,
     /// Wizard de configuração: língua, modelo e download automático.
@@ -58,28 +61,26 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
         Command::Start => start(),
-        Command::Stop => {
-            let resp = ipc::request(ipc::Cmd::Stop)?;
-            print_response(&resp);
-            Ok(())
-        }
+        Command::Stop => request_command(ipc::Cmd::Stop),
         Command::Daemon => daemon::run(),
-        Command::Toggle => {
-            let resp = ipc::request(ipc::Cmd::Toggle)?;
-            print_response(&resp);
-            Ok(())
-        }
-        Command::Status => {
-            let resp = ipc::request(ipc::Cmd::Status)?;
-            print_response(&resp);
-            Ok(())
-        }
+        Command::Toggle => request_command(ipc::Cmd::Toggle),
+        Command::Record => request_command(ipc::Cmd::Record),
+        Command::Commit => request_command(ipc::Cmd::Commit),
+        Command::Cancel => request_command(ipc::Cmd::Cancel),
+        Command::Pause => request_command(ipc::Cmd::Pause),
+        Command::Status => request_command(ipc::Cmd::Status),
         Command::Setup {
             lang,
             model,
             ai_model,
         } => setup::run(lang, model, ai_model),
     }
+}
+
+fn request_command(cmd: ipc::Cmd) -> Result<()> {
+    let resp = ipc::request(cmd)?;
+    print_response(&resp);
+    Ok(())
 }
 
 /// Sobe o daemon destacado do terminal: sessão própria (sobrevive ao fechar o
