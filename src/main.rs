@@ -55,14 +55,21 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Wizard de configuração: língua, modelo e download automático.
+    /// Onboarding: escolhas, resumo e download automático dos modelos.
     Setup {
         #[arg(long)]
         lang: Option<String>,
         #[arg(long)]
         model: Option<String>,
-        #[arg(long = "ai-model")]
+        #[arg(long = "ai-model", conflicts_with = "no_ai")]
         ai_model: Option<String>,
+        #[arg(long = "insert-mode")]
+        insert_mode: Option<String>,
+        #[arg(long = "no-ai", conflicts_with = "ai_model")]
+        no_ai: bool,
+        /// Aceita o resumo sem confirmação; nunca inicia o daemon.
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
 }
 
@@ -122,7 +129,20 @@ fn main() -> Result<()> {
             lang,
             model,
             ai_model,
-        } => setup::run(lang, model, ai_model),
+            insert_mode,
+            no_ai,
+            yes,
+        } => {
+            let start_daemon = setup::run(setup::SetupOptions {
+                lang,
+                model,
+                ai_model,
+                insert_mode,
+                no_ai,
+                yes,
+            })?;
+            if start_daemon { start() } else { Ok(()) }
+        }
     }
 }
 
@@ -320,6 +340,40 @@ mod tests {
     #[test]
     fn operational_commands_reject_status_json_flag() {
         assert!(Cli::try_parse_from(["whisper", "toggle", "--json"]).is_err());
+    }
+
+    #[test]
+    fn setup_accepts_scriptable_choices() {
+        let cli = Cli::try_parse_from([
+            "whisper",
+            "setup",
+            "--lang",
+            "pt",
+            "--model",
+            "small",
+            "--insert-mode",
+            "both",
+            "--no-ai",
+            "--yes",
+        ])
+        .unwrap();
+
+        assert!(matches!(
+            cli.cmd,
+            Command::Setup {
+                no_ai: true,
+                yes: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn setup_rejects_conflicting_ai_choices() {
+        assert!(
+            Cli::try_parse_from(["whisper", "setup", "--ai-model", "qwen3.5-0.8b", "--no-ai",])
+                .is_err()
+        );
     }
 
     #[test]

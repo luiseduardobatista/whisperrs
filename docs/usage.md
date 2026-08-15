@@ -7,7 +7,7 @@ com compositor/systemd e os problemas comuns.
 
 | Comando | Descrição |
 |---------|-----------|
-| `whisper setup [--lang pt\|en\|auto] [--model …] [--ai-model qwen3.5-0.8b]` | wizard: língua + modelos + download (gera o `config.toml`) |
+| `whisper setup [--lang pt\|en\|auto] [--model …] [--insert-mode type\|clipboard\|both] [--ai-model …\|--no-ai] [--yes]` | onboarding: escolhas, resumo e download (gera o `config.toml`) |
 | `whisper start` | sobe o daemon em background; idempotente |
 | `whisper stop` | para o daemon; é sucesso se ele já estiver parado |
 | `whisper restart` | compõe `stop` e `start`, aguardando o socket antigo sair |
@@ -46,7 +46,7 @@ O modo humano mostra o estado da sessão quando o daemon está disponível e
 objeto em stdout, sem texto humano, ANSI ou avisos:
 
 ```json
-{"daemon":"running","state":"recording","language":"pt","model":"turbo","smart":false,"exe":"/caminho/para/whisper"}
+{"daemon":"running","state":"recording","language":"pt","model":"small","smart":false,"exe":"/caminho/para/whisper"}
 ```
 
 Campos `language`, `model`, `smart` e `exe` são opcionais para compatibilidade
@@ -61,14 +61,30 @@ Falhas de permissão, transporte, leitura ou parsing não são convertidas em
 
 ### setup
 
-`whisper setup` é um wizard interativo de língua e modelo; flags `--lang` e
-`--model` pulam a interação. `--ai-model qwen3.5-0.8b` baixa o GGUF Qwen e o
-ativa no catálogo, sem alterar `ai.enabled`; sem a flag, o wizard pergunta ao
-final se deseja baixá-lo (default: não). O modelo é carregado sob demanda.
-Baixa os modelos (se ainda não existirem) e salva
-`~/.config/whisper/config.toml`. O download usa **conexões paralelas** (HTTP
-Range, até 16, como o aria2c `-x 16`) para aproveitar a banda; falha remove o
-arquivo parcial para não envenenar uma próxima tentativa.
+`whisper setup` coleta idioma, modelo, modo de inserção e a decisão sobre o
+Qwen antes de qualquer download. O modelo `small` é o recomendado para uma
+instalação nova; modelos existentes continuam selecionados ao repetir o setup.
+O resumo mostra os componentes ausentes e o tamanho aproximado antes de baixar.
+
+Flags disponíveis:
+
+- `--lang pt|en|auto` e `--model ...` pulam essas escolhas;
+- `--insert-mode type|clipboard|both` define como o texto será entregue;
+- `--ai-model qwen3.5-0.8b` habilita o Qwen e inclui seu download;
+- `--no-ai` desabilita o Qwen sem baixá-lo;
+- `--yes` aceita o resumo sem confirmação e nunca inicia o daemon.
+
+Para uso não interativo, forneça todas as escolhas ou use `--yes`, por exemplo:
+
+```sh
+whisper setup --lang pt --model small --insert-mode both --no-ai --yes
+```
+
+Sem flags de AI, o modo interativo pergunta e começa com Qwen desativado quando
+não há modelo instalado. Ao terminar, somente o modo interativo oferece iniciar
+o daemon. O modelo é carregado sob demanda. O download usa **conexões
+paralelas** (HTTP Range, até 16, como o aria2c `-x 16`) para aproveitar a banda;
+falha remove o arquivo parcial para não envenenar uma próxima tentativa.
 
 ## Sessão de ditado
 

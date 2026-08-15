@@ -1322,6 +1322,7 @@ mod tests {
         ));
         std::fs::write(&path, b"modelo").unwrap();
         let mut cfg = Config::default();
+        cfg.ai.enabled = true;
         cfg.ai.model = path.display().to_string();
         cfg.ai.cleanup = false;
         assert!(!use_ai(&cfg, false));

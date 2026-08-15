@@ -3,6 +3,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub const DEFAULT_MODEL: &str = "small";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
@@ -43,6 +45,16 @@ pub enum InsertMode {
     Both,
 }
 
+impl InsertMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            InsertMode::Type => "Digitar automaticamente",
+            InsertMode::Clipboard => "Somente copiar para o clipboard",
+            InsertMode::Both => "Digitar e copiar para o clipboard",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AiConfig {
@@ -56,7 +68,7 @@ pub struct AiConfig {
 impl Default for AiConfig {
     fn default() -> Self {
         AiConfig {
-            enabled: true,
+            enabled: false,
             model: "qwen3.5-0.8b".to_string(),
             context_size: 2048,
             gpu: true,
@@ -86,7 +98,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             language: Language::Pt,
-            model: "turbo".to_string(),
+            model: DEFAULT_MODEL.to_string(),
             insert_mode: InsertMode::Both,
             remove_fillers: true,
             punctuation: true,
@@ -187,9 +199,10 @@ mod tests {
     fn parse_config_file_with_defaults() {
         let cfg: Config = toml::from_str("").unwrap();
         assert_eq!(cfg.language, Language::Pt);
-        assert_eq!(cfg.model, "turbo");
+        assert_eq!(cfg.model, DEFAULT_MODEL);
         assert!(cfg.punctuation);
         assert_eq!(cfg.insert_mode, InsertMode::Both);
+        assert!(!cfg.ai.enabled);
         assert_eq!(cfg.ai, AiConfig::default());
     }
 
