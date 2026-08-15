@@ -72,8 +72,10 @@ focada.
 ```bash
 whisper setup              # wizard: língua + modelo + download
 whisper start              # sobe o daemon em background (idempotente)
-whisper stop               # derruba o daemon
-whisper status             # estado do daemon
+whisper stop               # para o daemon; sucesso se já estiver parado
+whisper restart            # reinicia o daemon
+whisper status             # estado humano do daemon
+whisper status --json      # estado para scripts e status bars
 whisper toggle             # inicia ou conclui a sessão (bind no compositor)
 whisper record             # inicia ou retoma uma sessão
 whisper commit             # conclui a sessão atual
@@ -85,6 +87,18 @@ whisper daemon             # daemon em primeiro plano (debug / systemd)
 `whisper start` roda o daemon destacado do terminal (grupo de processo
 próprio, sobrevive ao fechar o shell) com log em
 `~/.local/state/whisper/daemon.log`; com o daemon já rodando, apenas avisa.
+`stop` é idempotente: parar um daemon que já não está rodando retorna sucesso.
+`restart` compõe `stop` e `start`, aguardando o socket antigo desaparecer.
+
+Para automação, `whisper status --json` escreve somente um objeto JSON em
+stdout. Um daemon parado é um resultado válido e retorna exit code `0`:
+
+```json
+{"daemon":"running","state":"recording","language":"pt","model":"turbo","smart":false}
+```
+
+Falhas de transporte ou protocolo não escrevem JSON em stdout, informam o
+problema em stderr e retornam exit code `1`.
 
 Sessão de ditado:
 

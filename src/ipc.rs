@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::mpsc::Sender;
+use std::time::Duration;
+
+const STATUS_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -32,12 +35,41 @@ pub struct Response {
     /// reinicia.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exe: Option<String>,
+    /// Idioma aceito pela configuração atual (preenchido somente em `status`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// Modelo configurado no daemon (preenchido somente em `status`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Smart Mode da sessão atual (preenchido somente em `status`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smart: Option<bool>,
 }
 
 pub fn request(cmd: Cmd) -> Result<Response> {
+    request_with_timeout(cmd, None)
+}
+
+/// Consulta o status com limite de espera: essa operação é somente leitura e
+/// não pode deixar scripts presos a um peer IPC que aceitou a conexão sem
+/// responder. Comandos mutáveis não usam timeout, pois o protocolo não tem
+/// cancelamento e o daemon poderia executá-los depois de o CLI desistir.
+pub fn request_status() -> Result<Response> {
+    request_with_timeout(Cmd::Status, Some(STATUS_TIMEOUT))
+}
+
+fn request_with_timeout(cmd: Cmd, timeout: Option<Duration>) -> Result<Response> {
     let path = crate::config::socket_path();
     let mut stream = UnixStream::connect(&path)
         .with_context(|| format!("daemon não está rodando ({})", path.display()))?;
+    if let Some(timeout) = timeout {
+        stream
+            .set_write_timeout(Some(timeout))
+            .context("configurando timeout de escrita IPC")?;
+        stream
+            .set_read_timeout(Some(timeout))
+            .context("configurando timeout de leitura IPC")?;
+    }
     writeln!(stream, "{}", serde_json::to_string(&Request { cmd })?)?;
     let mut line = String::new();
     BufReader::new(&mut stream).read_line(&mut line)?;
@@ -99,6 +131,9 @@ mod tests {
         // campo deve desserializar como None (e o CLI reinicia o daemon).
         let resp: Response = serde_json::from_str(r#"{"ok":true,"state":"idle"}"#).unwrap();
         assert_eq!(resp.exe, None);
+        assert_eq!(resp.language, None);
+        assert_eq!(resp.model, None);
+        assert_eq!(resp.smart, None);
     }
 
     #[test]
@@ -107,6 +142,9 @@ mod tests {
             state: "idle".to_string(),
             error: None,
             exe: Some("/nix/store/x-whisper/bin/.whisper-wrapped".to_string()),
+            language: Some("pt".to_string()),
+            model: Some("turbo".to_string()),
+            smart: Some(false),
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"exe\":\"/nix/store/x-whisper/bin/.whisper-wrapped\""));
@@ -115,6 +153,18 @@ mod tests {
             back.exe.as_deref(),
             Some("/nix/store/x-whisper/bin/.whisper-wrapped")
         );
+        assert_eq!(back.language.as_deref(), Some("pt"));
+        assert_eq!(back.model.as_deref(), Some("turbo"));
+        assert_eq!(back.smart, Some(false));
+    }
+
+    #[test]
+    fn old_daemon_response_without_status_metadata_remains_compatible() {
+        let resp: Response = serde_json::from_str(r#"{"state":"recording","exe":"/old"}"#).unwrap();
+
+        assert_eq!(resp.language, None);
+        assert_eq!(resp.model, None);
+        assert_eq!(resp.smart, None);
     }
 
     #[test]

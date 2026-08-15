@@ -291,6 +291,9 @@ impl Daemon {
                                 state: "stopping".to_string(),
                                 error: None,
                                 exe: None,
+                                language: None,
+                                model: None,
+                                smart: None,
                             });
                             break;
                         }
@@ -400,6 +403,9 @@ impl Daemon {
             state: self.state_str().to_string(),
             error: None,
             exe: None,
+            language: None,
+            model: None,
+            smart: None,
         };
         if matches!(cmd, Cmd::Status) {
             // O CLI compara com o próprio binário: daemon de outra origem
@@ -408,6 +414,9 @@ impl Daemon {
             resp.exe = std::env::current_exe()
                 .ok()
                 .map(|p| p.display().to_string());
+            resp.language = Some(self.cfg.language.label().to_string());
+            resp.model = Some(self.cfg.model.clone());
+            resp.smart = Some(self.smart_mode);
         }
         resp
     }
@@ -1052,6 +1061,31 @@ mod tests {
             events_rx,
             events_tx,
         }
+    }
+
+    #[test]
+    fn status_response_includes_current_session_metadata() {
+        let mut daemon = test_daemon(1, Phase::Recording);
+        daemon.cfg.language = crate::config::Language::En;
+        daemon.cfg.model = "small".to_string();
+        daemon.smart_mode = true;
+
+        let response = daemon.handle_cmd(Cmd::Status);
+
+        assert_eq!(response.language.as_deref(), Some("en"));
+        assert_eq!(response.model.as_deref(), Some("small"));
+        assert_eq!(response.smart, Some(true));
+    }
+
+    #[test]
+    fn non_status_response_does_not_include_session_metadata() {
+        let mut daemon = test_daemon(1, Phase::Recording);
+
+        let response = daemon.handle_cmd(Cmd::Toggle);
+
+        assert_eq!(response.language, None);
+        assert_eq!(response.model, None);
+        assert_eq!(response.smart, None);
     }
 
     #[test]
