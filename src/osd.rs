@@ -491,6 +491,12 @@ impl WindowHandler for App {
     }
 }
 
+fn swap_red_blue(pixels: &mut [u8]) {
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+}
+
 impl App {
     fn draw(&mut self, _qh: &QueueHandle<Self>) {
         let s = self.scale as i32;
@@ -504,19 +510,26 @@ impl App {
             eprintln!("whisper: pool SHM sem espaço para o frame do OSD ({w}x{h})");
             return;
         };
-        let Some(mut pix) = PixmapMut::from_bytes(canvas, w as u32, h as u32) else {
-            return;
-        };
         let ui = match self.ui.lock() {
             Ok(ui) => ui,
             Err(_) => return,
         };
-        draw_card(
-            &mut pix,
-            Transform::from_scale(s as f32, s as f32),
-            &ui,
-            font(),
-        );
+        // tiny-skia desenha bytes RGBA, enquanto ARGB8888 no Wayland little-endian
+        // usa BGRA em memória. Converte antes e depois para preservar os canais.
+        swap_red_blue(canvas);
+        {
+            let Some(mut pix) = PixmapMut::from_bytes(canvas, w as u32, h as u32) else {
+                swap_red_blue(canvas);
+                return;
+            };
+            draw_card(
+                &mut pix,
+                Transform::from_scale(s as f32, s as f32),
+                &ui,
+                font(),
+            );
+        }
+        swap_red_blue(canvas);
         drop(ui);
         self.kind.surface().damage_buffer(0, 0, w, h);
         if buffer.attach_to(self.kind.surface()).is_ok() {
@@ -541,4 +554,21 @@ impl ProvidesRegistryState for App {
     }
 
     smithay_client_toolkit::registry_handlers![OutputState, SeatState];
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn swap_red_blue_converts_rgba_to_wayland_argb8888_bytes() {
+        let rgba = [52, 152, 219, 255];
+        let mut pixels = rgba;
+
+        swap_red_blue(&mut pixels);
+        assert_eq!(pixels, [219, 152, 52, 255]);
+
+        swap_red_blue(&mut pixels);
+        assert_eq!(pixels, rgba);
+    }
 }
