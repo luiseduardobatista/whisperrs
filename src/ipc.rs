@@ -5,10 +5,14 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::mpsc::Sender;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Cmd {
     Toggle,
+    Record,
+    Commit,
+    Cancel,
+    Pause,
     Status,
     Stop,
 }
@@ -111,5 +115,24 @@ mod tests {
             back.exe.as_deref(),
             Some("/nix/store/x-whisper/bin/.whisper-wrapped")
         );
+    }
+
+    #[test]
+    fn commands_use_stable_lowercase_wire_names() {
+        let cases = [
+            (Cmd::Toggle, "toggle"),
+            (Cmd::Record, "record"),
+            (Cmd::Commit, "commit"),
+            (Cmd::Cancel, "cancel"),
+            (Cmd::Pause, "pause"),
+            (Cmd::Status, "status"),
+            (Cmd::Stop, "stop"),
+        ];
+
+        for (cmd, name) in cases {
+            let json = serde_json::to_string(&Request { cmd }).unwrap();
+            assert_eq!(json, format!(r#"{{"cmd":"{name}"}}"#));
+            assert_eq!(serde_json::from_str::<Request>(&json).unwrap().cmd, cmd);
+        }
     }
 }

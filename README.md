@@ -38,7 +38,8 @@ whisper start              # sobe o daemon em background (não trava o shell)
 ```
 
 Dite: pressione a tecla do compositor (ou `whisper toggle`), fale e conclua
-com `Enter` — o texto é inserido na app focada.
+com `Enter` ou acionando novamente o atalho global — o texto é inserido na app
+focada.
 
 ---
 
@@ -46,6 +47,7 @@ com `Enter` — o texto é inserido na app focada.
 
 ```
 [hotkey do compositor] ─► whisper toggle ─► daemon abre o OSD (borda inferior)
+                                          Toggle novamente = concluir
                                           Space = pausar/retomar gravação
                                           Enter = concluir: transcreve + insere + fecha
                                           Esc   = cancelar (descarta)
@@ -72,7 +74,11 @@ whisper setup              # wizard: língua + modelo + download
 whisper start              # sobe o daemon em background (idempotente)
 whisper stop               # derruba o daemon
 whisper status             # estado do daemon
-whisper toggle             # inicia/cancela uma sessão (bind no compositor)
+whisper toggle             # inicia ou conclui a sessão (bind no compositor)
+whisper record             # inicia ou retoma uma sessão
+whisper commit             # conclui a sessão atual
+whisper cancel             # cancela e descarta a sessão
+whisper pause              # pausa a gravação
 whisper daemon             # daemon em primeiro plano (debug / systemd)
 ```
 
@@ -89,7 +95,9 @@ Sessão de ditado:
 | `Esc` | cancelar e descartar |
 | `S` | alternar o modo smart do Qwen (se habilitado) |
 
-Integrações (Niri, systemd) e problemas comuns: [docs/usage.md](docs/usage.md).
+O `toggle` durante `Loading` ou `Transcribing` não altera a sessão; use
+`cancel` ou `Esc` para descartar explicitamente. Integrações (Niri, systemd) e
+problemas comuns: [docs/usage.md](docs/usage.md).
 
 ---
 

@@ -34,7 +34,7 @@ daemon` em primeiro plano.
 
 ```
 src/
-  main.rs        # CLI (clap): start/stop/daemon/toggle/status/setup
+  main.rs        # CLI (clap): start/stop/daemon/toggle/record/commit/cancel/pause/status/setup
   daemon.rs      # orquestrador: sessões, fases, hot reload, threads
   ipc.rs         # protocolo: socket Unix + JSON por linha
   config.rs      # config.toml, caminhos XDG, mtime (hot reload)
@@ -64,7 +64,11 @@ O daemon é um loop de eventos sem async: tudo é `std::thread` + canais
 ## IPC protocol
 
 - Socket: `$XDG_RUNTIME_DIR/whisper.sock`, JSON por linha.
-- Request: `{ "cmd": "toggle" | "status" | "stop" }`.
+- Request: `{ "cmd": "toggle" | "record" | "commit" | "cancel" | "pause" | "status" | "stop" }`.
+- `toggle`: em `Idle` inicia; em `Recording`/`Paused` conclui; em
+  `Loading`/`Transcribing` é no-op.
+- `record`: inicia em `Idle` e retoma em `Paused`; `commit` conclui;
+  `cancel` descarta; `pause` pausa somente uma gravação.
 - Response: `{ "state": str, "error": str|null, "exe": str|null }`
   — `exe` (só em `status`) é o caminho do binário do daemon; ausente em
   daemons de versões antigas (campos desconhecidos do lado antigo são
@@ -80,21 +84,26 @@ Recording, Paused, Transcribing, Error).
 
 Fluxo de uma sessão:
 
-1. `toggle` com o daemon `Idle` → `start_session`: cria o OSD; na primeira
-   sessão carrega o engine (async, `Loading`); depois `start_capture`
+1. `toggle`/`record` com o daemon `Idle` → `start_session`: cria o OSD; na
+   primeira sessão carrega o engine (async, `Loading`); depois `start_capture`
    (`pw-record`).
-2. `Space` alterna `Recording ⇄ Paused`. Chunks de áudio viram amostras no
-   buffer + nível RMS para a waveform.
-3. `Enter` → `commit`: para a captura e manda o buffer para a thread worker
-   (VAD → whisper → Qwen/fallback → inserção). O VAD (Silero, CPU) extrai os
-   segmentos de fala do buffer e concatena só eles — silêncio das bordas e
-   pausas longas não vão para o whisper. O Qwen só é tentado quando está
-   habilitado e disponível; qualquer falha volta ao cleanup Rust.
-4. `handle_worker` agenda `pending_insert` e fecha o OSD imediatamente —
-   sem preview do texto: ele aparece direto na app focada.
-5. Evento `Closed` (emitido pela thread do OSD ao sair, após flush do
+2. `Space`/`pause` coloca a sessão em `Paused`; `Space`/`record` retoma em
+   `Recording`. Chunks de áudio viram amostras no buffer + nível RMS para a
+   waveform somente enquanto a fase é `Recording`.
+3. `toggle`/`Enter`/`commit` em `Recording` ou `Paused` → para a captura e manda
+   o buffer para a thread worker (VAD → whisper → Qwen/fallback → inserção).
+   O VAD (Silero, CPU) extrai os segmentos de fala do buffer e concatena só
+   eles — silêncio das bordas e pausas longas não vão para o whisper. O Qwen só
+   é tentado quando está habilitado e disponível; qualquer falha volta ao
+   cleanup Rust.
+4. `toggle` durante `Loading` ou `Transcribing` é no-op; o trabalho em
+   andamento não é descartado.
+5. `handle_worker` agenda `pending_insert` e fecha o OSD imediatamente — sem
+   preview do texto: ele aparece direto na app focada.
+6. Evento `Closed` (emitido pela thread do OSD ao sair, após flush do
    destroy) → **só então** `insert::insert` digita na app focada → `Idle`.
-6. `Esc` → `cancel_session`: mata captura, fecha OSD, descarta pendências.
+7. `Esc`/`cancel` → `cancel_session`: mata captura, fecha OSD, descarta
+   pendências.
 
 **Invariante crítico:** a inserção acontece depois do `Closed`. Enquanto o
 OSD está visível ele segura o foco de teclado — `wtype` digitando antes

@@ -11,7 +11,11 @@ com compositor/systemd e os problemas comuns.
 | `whisper start` | sobe o daemon em background; idempotente |
 | `whisper stop` | derruba o daemon (encerra sessão ativa e remove o socket) |
 | `whisper status` | mostra o estado do daemon (`idle`, `recording`, …) |
-| `whisper toggle` | inicia uma sessão de ditado; ativo = cancela |
+| `whisper toggle` | inicia ou conclui a sessão; em `Loading`/`Transcribing`, não faz nada |
+| `whisper record` | inicia uma sessão ou retoma uma sessão pausada |
+| `whisper commit` | conclui a sessão em gravação/pausa |
+| `whisper cancel` | cancela e descarta a sessão atual |
+| `whisper pause` | pausa uma sessão em gravação |
 | `whisper daemon` | daemon em primeiro plano (debug / systemd) |
 
 ### start
@@ -41,7 +45,9 @@ arquivo parcial para não envenenar uma próxima tentativa.
 
 ## Sessão de ditado
 
-O `toggle` abre o OSD na borda inferior da tela com a waveform ao vivo:
+O `toggle` inicia uma sessão em `Idle` ou conclui uma sessão em
+`Recording`/`Paused`. Durante `Loading` ou `Transcribing`, é um no-op. O OSD
+abre na borda inferior da tela com a waveform ao vivo:
 
 | Tecla | Ação |
 |-------|------|
@@ -52,15 +58,19 @@ O `toggle` abre o OSD na borda inferior da tela com a waveform ao vivo:
 
 Fluxo interno de uma sessão:
 
-1. `toggle` → o modelo é carregado na primeira sessão (fica residente em
-   VRAM) e a captura começa (`pw-record`, f32 mono 16 kHz).
-2. `Enter` → para a captura e transcreve em batch (Vulkan, ~1 s no turbo).
-3. Pós-processamento: corte de silêncio, remoção de fillers,
+1. `toggle`/`record` em `Idle` → o modelo é carregado na primeira sessão (fica
+   residente em VRAM) e a captura começa (`pw-record`, f32 mono 16 kHz).
+2. `Space`/`pause` pausa a captura logicamente; `Space` ou `record` retoma.
+3. `toggle`/`Enter`/`commit` em `Recording` ou `Paused` → para a captura e
+   transcreve em batch (Vulkan, ~1 s no turbo).
+4. Pós-processamento: corte de silêncio, remoção de fillers,
    capitalização/pontuação e período final (configurável).
-4. O OSD mostra o texto transcrito, fecha e **só então** o texto é digitado
-   na app focada (`wtype`) e copiado para o clipboard (`wl-copy`). A ordem
-   importa: enquanto o OSD está visível ele segura o foco de teclado, e o
-   `wtype` digitaria nele — por isso a inserção espera o OSD fechar.
+5. O OSD fecha e **só então** o texto é digitado na app focada (`wtype`) e
+   copiado para o clipboard (`wl-copy`). A ordem importa: enquanto o OSD está
+   visível ele segura o foco de teclado, e o `wtype` digitaria nele — por isso
+   a inserção espera o OSD fechar.
+6. `Esc`/`cancel` descarta explicitamente a sessão, inclusive durante o
+   carregamento ou a transcrição.
 
 A língua é forçada no modelo (mais rápido e preciso que auto-detect); `auto`
 deixa o whisper decidir. Acentos vêm do próprio modelo.

@@ -17,7 +17,7 @@ Ditado por voz em Rust para Linux/Wayland: `pw-record` captura, whisper.cpp
 devenv shell                 # ambiente de dev (build com cargo, não com nix)
 cargo build
 cargo test
-./target/debug/whisper start | status | stop | toggle
+./target/debug/whisper start | status | stop | toggle | record | commit | cancel | pause
 ```
 Não usar --release durante desenvolvimento
 
