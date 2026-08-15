@@ -8,8 +8,8 @@ aplica mudanças em ~1 s, sem reiniciar (hot reload).
 
 ```toml
 language = "pt"        # pt | en | auto
-model = "turbo"        # tiny | base | small | medium | large-v3 | turbo
-insert_mode = "both"   # type | clipboard | both
+model = "small"        # recomendado; tiny | base | small | medium | large-v3 | turbo
+insert_mode = "fallback" # insert | clipboard | fallback | both
 remove_fillers = true  # remove "hmm", "ahn"…
 punctuation = true     # capitaliza frases e normaliza espaços
 final_period = true    # garante ponto final
@@ -18,7 +18,7 @@ threads = 4
 # source = "nome.do.no.pipewire"   # fonte de áudio explícita (pw-record --target)
 
 [ai]
-enabled = true                  # usa Qwen quando disponível
+enabled = false                 # o setup ativa somente se Qwen for escolhido
 model = "qwen3.5-0.8b"           # nome do catálogo ou caminho com '/'
 context_size = 2048
 gpu = true
@@ -28,19 +28,23 @@ cleanup = true                  # pós-processa também sem o modo smart
 | Opção | Valores | Default | Efeito |
 |-------|---------|---------|--------|
 | `language` | `pt` / `en` / `auto` | `pt` | língua forçada na transcrição; `auto` deixa o whisper detectar |
-| `model` | `tiny`…`turbo` | `turbo` | modelo whisper.cpp (ver [Modelos](#modelos)) |
-| `insert_mode` | `type` / `clipboard` / `both` | `both` | digita na app (`wtype`), copia (`wl-copy`) ou ambos |
+| `model` | `tiny`…`turbo` | `small` | modelo whisper.cpp; `small` é o recomendado pelo setup (ver [Modelos](#modelos)) |
+| `insert_mode` | `insert` / `clipboard` / `fallback` / `both` | `fallback` | digita, copia, usa clipboard só se necessário ou faz ambos |
 | `remove_fillers` | `true` / `false` | `true` | remove fillers ("hmm", "ahn"…) |
 | `punctuation` | `true` / `false` | `true` | capitaliza frases e normaliza espaços |
 | `final_period` | `true` / `false` | `true` | garante ponto final |
 | `gpu_device` | inteiro | `0` | índice do dispositivo Vulkan |
 | `threads` | inteiro | `4` | threads da transcrição |
 | `source` | nome de nó PipeWire | `null` | fonte de áudio explícita (`pw-record --target`) |
-| `ai.enabled` | booleano | `true` | habilita o pós-processamento Qwen quando modelo e `llama-server` existem |
+| `ai.enabled` | booleano | `false` no setup sem Qwen | habilita o pós-processamento Qwen quando modelo e `llama-server` existem |
 | `ai.model` | nome ou caminho | `qwen3.5-0.8b` | modelo GGUF; nomes usam o catálogo LLM |
 | `ai.context_size` | inteiro | `2048` | contexto passado ao `llama-server` |
 | `ai.gpu` | booleano | `true` | tenta carregar as camadas na GPU e cai para CPU se necessário |
 | `ai.cleanup` | booleano | `true` | usa Qwen no cleanup normal; o modo smart tenta Qwen sempre que habilitado |
+
+`insert_mode = "type"` continua aceito como alias legado de `"insert"`. Configurações
+existentes com `"both"` preservam o comportamento anterior; o novo padrão só se
+aplica quando o campo está ausente.
 
 ## Detecção de voz (VAD)
 
@@ -80,19 +84,21 @@ reload.
 Multilíngues, oficiais do whisper.cpp (HuggingFace), baixados para
 `~/.local/share/whisper/models/` (respeita `XDG_DATA_HOME`):
 
-| Modelo | Arquivo | Tamanho |
-|--------|---------|---------|
-| `tiny` | `ggml-tiny.bin` | 75 MB |
-| `base` | `ggml-base.bin` | 142 MB |
-| `small` | `ggml-small.bin` | 466 MB |
-| `medium` | `ggml-medium.bin` | 1,5 GB |
-| `large-v3` | `ggml-large-v3.bin` | 3,1 GB |
-| `turbo` | `ggml-large-v3-turbo.bin` | 1,6 GB |
+| Modelo | Perfil | Arquivo | Tamanho |
+|--------|--------|---------|---------|
+| `tiny` | muito leve · menor precisão | `ggml-tiny.bin` | 75 MB |
+| `base` | leve · para máquinas modestas | `ggml-base.bin` | 142 MB |
+| `small` | **recomendado · equilíbrio entre precisão e recursos** | `ggml-small.bin` | 466 MB |
+| `medium` | mais preciso · mais pesado | `ggml-medium.bin` | 1,5 GB |
+| `large-v3` | máxima precisão · muito pesado | `ggml-large-v3.bin` | 3,1 GB |
+| `turbo` | rápido em hardware forte · download maior | `ggml-large-v3-turbo.bin` | 1,6 GB |
 
-O `whisper setup` baixa o modelo escolhido **e** o modelo VAD (fixo). Com
-`--ai-model qwen3.5-0.8b` (ou respondendo "sim" à pergunta do wizard), baixa
-também o GGUF do Qwen; o daemon nunca baixa
-modelos. O modelo de transcrição é carregado na primeira sessão de ditado e
+O `whisper setup` mostra um resumo e o tamanho aproximado dos arquivos que
+faltam antes de baixar o modelo escolhido **e** o modelo VAD (fixo). Com
+`--ai-model qwen3.5-0.8b` (ou respondendo "sim" à pergunta do wizard), habilita
+e baixa também o GGUF do Qwen; `--no-ai` desabilita o recurso sem baixar o
+modelo. O daemon nunca baixa modelos. O modelo de transcrição é carregado na
+primeira sessão de ditado e
 fica residente em VRAM até o daemon parar. Os downloads usam **conexões
 paralelas** (HTTP Range,
 até 16, como o aria2c `-x 16`) para aproveitar a banda da internet; se o
@@ -115,7 +121,8 @@ recarrega a config sem reiniciar:
   loga o erro em `~/.local/state/whisper/daemon.log`.
 
 Isso também vale para `whisper setup`: rodar o wizard com o daemon vivo já
-aplica tudo sem reiniciar (exceto o VAD — ver acima).
+aplica a configuração sem reiniciar. Um VAD recém-instalado exige reiniciar o
+daemon (`whisper restart`) para ser carregado.
 
 ## Teste de integração
 

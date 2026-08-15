@@ -20,6 +20,11 @@ cargo build
 ./target/debug/whisper toggle   # sessão de ditado (precisa Wayland + mic)
 ```
 
+O `setup` primeiro coleta todas as escolhas, monta um resumo dos downloads
+pendentes e só então executa os downloads e salva a configuração. O ciclo de
+vida do daemon continua em `main.rs`: o setup apenas retorna ao CLI se o
+usuário interativo pediu para iniciar o daemon.
+
 Dependências de runtime (fora do shell): `pw-record` (PipeWire), `wtype`,
 `wl-copy`, driver Vulkan e, opcionalmente, `llama-server` (llama.cpp ≥ b7973)
 no PATH. O pacote do flake (`nix build .#default`) já inclui `wtype`,
@@ -40,13 +45,13 @@ src/
   config.rs      # config.toml, caminhos XDG, mtime (hot reload)
   model.rs       # catálogo de modelos + download paralelo (HTTP Range)
   llm.rs         # cliente local do llama-server (Qwen, opcional)
-  setup.rs       # wizard interativo (dialoguer)
+  setup.rs       # onboarding, resumo e downloads (dialoguer)
   audio.rs       # captura pw-record (f32 mono 16 kHz)
   transcribe.rs  # engine whisper.cpp (whisper-rs, Vulkan) + VAD residente
   postprocess.rs # rms, remove_fillers, fix_punctuation (puros)
   osd.rs         # integração Wayland: superfícies, teclado e buffer SHM
   osd_draw.rs    # desenho puro do cartão (tiny-skia + ab_glyph)
-  insert.rs      # inserção: wtype (digita) + wl-copy (clipboard)
+  insert.rs      # inserção: wtype, wl-copy e fallback explícito
 ```
 
 ## Architecture
@@ -59,7 +64,9 @@ whisper toggle ──socket──► daemon (loop principal, recv_timeout até 1
 ```
 
 O daemon é um loop de eventos sem async: tudo é `std::thread` + canais
-`mpsc`. A CLI nunca fala com o OSD/áudio diretamente — só via IPC. Feedbacks
+`mpsc`. A CLI nunca fala com o OSD/áudio diretamente — só via IPC. O setup
+não interativo usa flags (`--insert-mode`, `--ai-model`, `--no-ai` e `--yes`)
+e não inicia o daemon. Feedbacks
 temporários usam um deadline monotônico; o `recv_timeout` espera no máximo até
 essa deadline, sem bloquear o processamento de eventos. Eventos vindos de
 threads carregam o contador da sessão e são descartados quando pertencem a uma
@@ -252,8 +259,9 @@ como prova de fala para o VAD — só áudio real.
 - `whisper daemon` em primeiro plano mostra stderr ao vivo (hot reload,
   erros de engine, falhas de inserção).
 - Falha de inserção não é visível no OSD (já fechado): olhe o
-  `daemon.log` (`inserção falhou: ...`); quando a cópia funcionar apesar da
-  digitação, o erro avisa que o texto ficou no clipboard.
+  `daemon.log`. No modo `fallback`, uma falha do `wtype` seguida de cópia
+  bem-sucedida é registrada como fallback esperado, não como falha total; se
+  as duas operações falharem, o log registra o erro real.
 - `whisper status` mostra também o binário do daemon (`daemon: ...`) — se
   ele não for o esperado, `whisper start` já reinicia com o binário atual.
 - Se `wtype` estiver ausente do PATH, `whisper start` avisa no console e o

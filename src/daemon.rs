@@ -1,7 +1,7 @@
 //! Daemon: orquestra as sessões de ditado — estado, áudio (pw-record),
 //! OSD (teclas), transcrição (whisper-rs) e inserção (wtype/wl-copy).
 use crate::audio::{self, Capture};
-use crate::config::{Config, InsertMode, config_mtime};
+use crate::config::{Config, config_mtime};
 use crate::insert;
 use crate::ipc::{self, Cmd, Response};
 use crate::llm;
@@ -220,8 +220,7 @@ pub fn run() -> Result<()> {
 /// Avisa (no stderr → daemon.log) se o wtype faltar no PATH quando o modo de
 /// inserção depende dele: a digitação na app vai falhar e sobra só o clipboard.
 fn warn_if_wtype_missing(cfg: &Config) {
-    if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both) && !insert::wtype_available()
-    {
+    if cfg.insert_mode.uses_wtype() && !insert::wtype_available() {
         eprintln!(
             "whisper: aviso: wtype não encontrado no PATH — a digitação na app focada vai \
              falhar (o texto irá só para o clipboard). {}",
@@ -487,11 +486,12 @@ impl Daemon {
             OsdEvent::Closed => {
                 if let Some(text) = self.pending_insert.take() {
                     // OSD fechado: o foco voltou à app, agora digita.
-                    if let Err(e) = insert::insert(&text, self.cfg.insert_mode) {
-                        // O insert detalha a falha e avisa quando o texto
-                        // sobrou no clipboard (modo both); a sessão encerra
-                        // do mesmo jeito.
-                        eprintln!("whisper: inserção falhou: {e}");
+                    match insert::insert(&text, self.cfg.insert_mode) {
+                        Ok(insert::InsertOutcome::Fallback { reason }) => eprintln!(
+                            "whisper: não foi possível inserir o texto; ele foi copiado para a área de transferência. Motivo: {reason}"
+                        ),
+                        Ok(_) => {}
+                        Err(error) => eprintln!("whisper: inserção falhou: {error}"),
                     }
                     self.finish_session(None);
                 } else {
@@ -777,8 +777,7 @@ impl Daemon {
 
     /// Atualiza o aviso do rodapé do OSD conforme as dependências disponíveis.
     fn refresh_warning(&mut self) {
-        let wtype_missing = matches!(self.cfg.insert_mode, InsertMode::Type | InsertMode::Both)
-            && !insert::wtype_available();
+        let wtype_missing = self.cfg.insert_mode.uses_wtype() && !insert::wtype_available();
         let vad_missing = self
             .engine
             .as_ref()
@@ -1322,6 +1321,7 @@ mod tests {
         ));
         std::fs::write(&path, b"modelo").unwrap();
         let mut cfg = Config::default();
+        cfg.ai.enabled = true;
         cfg.ai.model = path.display().to_string();
         cfg.ai.cleanup = false;
         assert!(!use_ai(&cfg, false));

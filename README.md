@@ -33,7 +33,7 @@ Instale no PATH, configure e suba o daemon:
 
 ```bash
 install -Dm755 target/debug/whisper ~/.local/bin/whisper
-whisper setup              # wizard: língua (pt/en/auto) + modelo + download
+whisper setup              # onboarding: idioma + small recomendado + resumo/download
 whisper start              # sobe o daemon em background (não trava o shell)
 ```
 
@@ -60,8 +60,8 @@ focada.
 - Pós-processamento: remoção de fillers ("hmm", "ahn"…),
   capitalização/pontuação e período final; opcionalmente Qwen3.5-0.8B local
   via `llama-server` (com fallback automático para o cleanup Rust).
-- Inserção: `wtype` digita na app focada + `wl-copy` coloca no clipboard
-  (modo configurável; se o `wtype` falhar, o texto está no clipboard).
+- Inserção: `wtype` digita na app focada e `wl-copy` pode copiar o texto
+  (modo configurável; o padrão preserva o clipboard e só copia se `wtype` falhar).
 - OSD em `wlr-layer-shell` (Niri, Sway, Hyprland, KDE ≥ 6.3, COSMIC) com
   fallback para janela xdg-toplevel (GNOME). Sem suporte a X11.
 
@@ -70,7 +70,7 @@ focada.
 ## Uso
 
 ```bash
-whisper setup              # wizard: língua + modelo + download
+whisper setup              # onboarding interativo; small é o recomendado
 whisper start              # sobe o daemon em background (idempotente)
 whisper stop               # para o daemon; sucesso se já estiver parado
 whisper restart            # reinicia o daemon
@@ -94,7 +94,7 @@ Para automação, `whisper status --json` escreve somente um objeto JSON em
 stdout. Um daemon parado é um resultado válido e retorna exit code `0`:
 
 ```json
-{"daemon":"running","state":"recording","language":"pt","model":"turbo","smart":false}
+{"daemon":"running","state":"recording","language":"pt","model":"small","smart":false}
 ```
 
 Falhas de transporte ou protocolo não escrevem JSON em stdout, informam o
@@ -121,14 +121,17 @@ problemas comuns: [docs/usage.md](docs/usage.md).
 observa o arquivo e recarrega na hora (hot reload, ~1 s): campos de sessão
 valem já na próxima sessão; trocar `model`/`gpu_device`/`threads` recarrega o
 modelo em background quando o daemon está ocioso (falha mantém o modelo
-atual). Config inválida é ignorada (mantém a anterior).
+atual). Config inválida é ignorada (mantém a anterior). O setup apresenta um
+resumo dos downloads antes de começar; no modo interativo também pode iniciar
+o daemon ao final.
 
 Referência completa de opções, modelos e download:
 [docs/configuration.md](docs/configuration.md).
 
-Para usar o pós-processamento Qwen, instale o modelo com
-`whisper setup --ai-model qwen3.5-0.8b` (ou responda "sim" à pergunta do
-setup) e mantenha `llama-server` no PATH:
+Para usar o pós-processamento Qwen, instale e habilite o modelo com
+`whisper setup --ai-model qwen3.5-0.8b --yes` (ou responda "sim" à pergunta do
+setup) e mantenha `llama-server` no PATH. Para um setup totalmente scriptável
+sem Qwen, use `--no-ai --yes`:
 
 ```toml
 [ai]
@@ -137,6 +140,12 @@ model = "qwen3.5-0.8b"
 context_size = 2048
 gpu = true
 cleanup = true
+```
+
+Exemplo não interativo completo:
+
+```bash
+whisper setup --lang pt --model small --insert-mode both --no-ai --yes
 ```
 
 ---

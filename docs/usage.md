@@ -7,7 +7,7 @@ com compositor/systemd e os problemas comuns.
 
 | Comando | Descrição |
 |---------|-----------|
-| `whisper setup [--lang pt\|en\|auto] [--model …] [--ai-model qwen3.5-0.8b]` | wizard: língua + modelos + download (gera o `config.toml`) |
+| `whisper setup [--lang pt\|en\|auto] [--model …] [--insert-mode insert\|clipboard\|fallback\|both] [--ai-model …\|--no-ai] [--yes]` | onboarding: escolhas, resumo e download (gera o `config.toml`) |
 | `whisper start` | sobe o daemon em background; idempotente |
 | `whisper stop` | para o daemon; é sucesso se ele já estiver parado |
 | `whisper restart` | compõe `stop` e `start`, aguardando o socket antigo sair |
@@ -46,7 +46,7 @@ O modo humano mostra o estado da sessão quando o daemon está disponível e
 objeto em stdout, sem texto humano, ANSI ou avisos:
 
 ```json
-{"daemon":"running","state":"recording","language":"pt","model":"turbo","smart":false,"exe":"/caminho/para/whisper"}
+{"daemon":"running","state":"recording","language":"pt","model":"small","smart":false,"exe":"/caminho/para/whisper"}
 ```
 
 Campos `language`, `model`, `smart` e `exe` são opcionais para compatibilidade
@@ -61,14 +61,30 @@ Falhas de permissão, transporte, leitura ou parsing não são convertidas em
 
 ### setup
 
-`whisper setup` é um wizard interativo de língua e modelo; flags `--lang` e
-`--model` pulam a interação. `--ai-model qwen3.5-0.8b` baixa o GGUF Qwen e o
-ativa no catálogo, sem alterar `ai.enabled`; sem a flag, o wizard pergunta ao
-final se deseja baixá-lo (default: não). O modelo é carregado sob demanda.
-Baixa os modelos (se ainda não existirem) e salva
-`~/.config/whisper/config.toml`. O download usa **conexões paralelas** (HTTP
-Range, até 16, como o aria2c `-x 16`) para aproveitar a banda; falha remove o
-arquivo parcial para não envenenar uma próxima tentativa.
+`whisper setup` coleta idioma, modelo, modo de inserção e a decisão sobre o
+Qwen antes de qualquer download. O modelo `small` é o recomendado para uma
+instalação nova; modelos existentes continuam selecionados ao repetir o setup.
+O resumo mostra os componentes ausentes e o tamanho aproximado antes de baixar.
+
+Flags disponíveis:
+
+- `--lang pt|en|auto` e `--model ...` pulam essas escolhas;
+- `--insert-mode insert|clipboard|fallback|both` define como o texto será entregue (`type` continua aceito como alias legado);
+- `--ai-model qwen3.5-0.8b` habilita o Qwen e inclui seu download;
+- `--no-ai` desabilita o Qwen sem baixá-lo;
+- `--yes` aceita o resumo sem confirmação e nunca inicia o daemon.
+
+Para uso não interativo, forneça todas as escolhas ou use `--yes`, por exemplo:
+
+```sh
+whisper setup --lang pt --model small --insert-mode fallback --no-ai --yes
+```
+
+Sem flags de AI, o modo interativo pergunta e começa com Qwen desativado quando
+não há modelo instalado. Ao terminar, somente o modo interativo oferece iniciar
+o daemon. O modelo é carregado sob demanda. O download usa **conexões
+paralelas** (HTTP Range, até 16, como o aria2c `-x 16`) para aproveitar a banda;
+falha remove o arquivo parcial para não envenenar uma próxima tentativa.
 
 ## Sessão de ditado
 
@@ -92,10 +108,11 @@ Fluxo interno de uma sessão:
    transcreve em batch (Vulkan, ~1 s no turbo).
 4. Pós-processamento: corte de silêncio, remoção de fillers,
    capitalização/pontuação e período final (configurável).
-5. O OSD fecha e **só então** o texto é digitado na app focada (`wtype`) e
-   copiado para o clipboard (`wl-copy`). A ordem importa: enquanto o OSD está
-   visível ele segura o foco de teclado, e o `wtype` digitaria nele — por isso
-   a inserção espera o OSD fechar.
+5. O OSD fecha e **só então** o texto é entregue conforme `insert_mode`. No
+   padrão `fallback`, ele é digitado na app focada (`wtype`) e só vai para o
+   clipboard (`wl-copy`) se a digitação falhar. `both` mantém a cópia sempre.
+   A ordem importa: enquanto o OSD está visível ele segura o foco de teclado,
+   e o `wtype` digitaria nele — por isso a inserção espera o OSD fechar.
 6. `Esc`/`cancel` descarta explicitamente a sessão, inclusive durante o
    carregamento ou a transcrição. Mensagens temporárias de erro ou de ausência
    de fala permanecem no OSD pelo tempo planejado sem bloquear `status`,
@@ -149,7 +166,7 @@ encontre `libvulkan`/`libxkbcommon` em runtime).
 | OSD mostra "modelo indisponível" | modelo não baixado | `whisper setup` |
 | OSD mostra "áudio indisponível" | sem microfone / sem PipeWire | confira `pw-record` e a fonte (`source` na config) |
 | "nada detectado" | silêncio na gravação | fale mais alto/próximo do microfone |
-| Texto só no clipboard, não na app | `wtype` falhou (ex.: app sem foco de teclado) | o texto está no clipboard (modo `both`); veja `~/.local/state/whisper/daemon.log` |
+| Texto só no clipboard, não na app | `wtype` falhou (ex.: app sem foco de teclado) | o texto está no clipboard (modo `fallback` ou `both`); veja `~/.local/state/whisper/daemon.log` |
 | Nada acontece ao rodar `whisper daemon` | é um serviço de primeiro plano silencioso | normal: use `whisper start`/`status` |
 | OSD não aparece | X11 | o whisper não suporta X11; use um compositor Wayland |
 

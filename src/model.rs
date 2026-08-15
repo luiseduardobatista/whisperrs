@@ -14,6 +14,7 @@ pub struct ModelSpec {
     pub name: &'static str,
     pub file: &'static str,
     pub size_mb: u64,
+    pub description: &'static str,
     /// Repositório HuggingFace do arquivo (resolve/main).
     pub base_url: &'static str,
 }
@@ -24,36 +25,42 @@ pub const MODELS: &[ModelSpec] = &[
         name: "tiny",
         file: "ggml-tiny.bin",
         size_mb: 75,
+        description: "muito leve · menor precisão",
         base_url: WHISPER_BASE_URL,
     },
     ModelSpec {
         name: "base",
         file: "ggml-base.bin",
         size_mb: 142,
+        description: "leve · para máquinas modestas",
         base_url: WHISPER_BASE_URL,
     },
     ModelSpec {
         name: "small",
         file: "ggml-small.bin",
         size_mb: 466,
+        description: "recomendado · equilíbrio entre precisão e recursos",
         base_url: WHISPER_BASE_URL,
     },
     ModelSpec {
         name: "medium",
         file: "ggml-medium.bin",
         size_mb: 1_535,
+        description: "mais preciso · mais pesado",
         base_url: WHISPER_BASE_URL,
     },
     ModelSpec {
         name: "large-v3",
         file: "ggml-large-v3.bin",
         size_mb: 3_093,
+        description: "máxima precisão · muito pesado",
         base_url: WHISPER_BASE_URL,
     },
     ModelSpec {
         name: "turbo",
         file: "ggml-large-v3-turbo.bin",
         size_mb: 1_620,
+        description: "rápido em hardware forte · download maior",
         base_url: WHISPER_BASE_URL,
     },
 ];
@@ -64,6 +71,7 @@ pub const LLM_MODELS: &[ModelSpec] = &[ModelSpec {
     name: "qwen3.5-0.8b",
     file: "Qwen_Qwen3.5-0.8B-Q5_K_M.gguf",
     size_mb: 650,
+    description: "pós-processamento inteligente local",
     base_url: "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main",
 }];
 
@@ -73,6 +81,7 @@ pub const VAD_MODEL: ModelSpec = ModelSpec {
     name: "silero-v6.2.0",
     file: "ggml-silero-v6.2.0.bin",
     size_mb: 1,
+    description: "filtro de voz e silêncio",
     base_url: VAD_BASE_URL,
 };
 
