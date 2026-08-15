@@ -38,7 +38,7 @@
     in {
       default = pkgs.rustPlatform.buildRustPackage {
         pname = "whisper";
-        version = "0.2.0";
+        version = "0.2.1";
         src = ./.;
         cargoLock.lockFile = ./Cargo.lock;
         nativeBuildInputs = [

@@ -40,6 +40,7 @@ fn phase_label(phase: Phase) -> &'static str {
         Phase::Paused => "pausado",
         Phase::Transcribing => "transcrevendo",
         Phase::Loading => "carregando",
+        Phase::Cleaning => "transcrevendo",
         Phase::Error => "erro",
     }
 }
@@ -47,9 +48,9 @@ fn phase_label(phase: Phase) -> &'static str {
 fn phase_color(phase: Phase) -> (u8, u8, u8) {
     match phase {
         Phase::Recording => (46, 204, 113),
-        Phase::Paused => (241, 196, 15),
-        Phase::Transcribing | Phase::Loading => (52, 152, 219),
-        Phase::Error => (231, 76, 60),
+        Phase::Paused | Phase::Transcribing | Phase::Loading | Phase::Cleaning | Phase::Error => {
+            (52, 152, 219)
+        }
     }
 }
 
@@ -68,7 +69,6 @@ pub(crate) fn draw_card(pix: &mut PixmapMut<'_>, t: Transform, ui: &UiState, fon
     let rect = Rect::from_xywh(cx, cy, w, h).unwrap();
     let path = rounded_rect_path(rect, 14.0);
     pix.fill_path(&path, &paint, FillRule::Winding, t, None);
-
     paint.set_color_rgba8(r, g, b, 255);
     let bar = Rect::from_xywh(cx + 14.0, cy + 16.0, 4.0, 20.0).unwrap();
     pix.fill_rect(bar, &paint, t, None);
@@ -97,7 +97,7 @@ pub(crate) fn draw_card(pix: &mut PixmapMut<'_>, t: Transform, ui: &UiState, fon
             cx + w - 14.0 - lw - smart_w - 10.0,
             cy + 30.0,
             13.0,
-            (147, 112, 219, 255),
+            (52, 152, 219, 255),
             w - 40.0,
             t,
         );
@@ -144,7 +144,8 @@ pub(crate) fn draw_card(pix: &mut PixmapMut<'_>, t: Transform, ui: &UiState, fon
 
     let status = ui.status.as_deref().unwrap_or(label);
     let status_color = if ui.phase == Phase::Error {
-        (231, 76, 60, 255)
+        let (r, g, b) = phase_color(ui.phase);
+        (r, g, b, 255)
     } else {
         (240, 240, 240, 255)
     };
@@ -163,7 +164,7 @@ pub(crate) fn draw_card(pix: &mut PixmapMut<'_>, t: Transform, ui: &UiState, fon
 
     let hints = "Space pausar · Enter concluir · Esc cancelar · S smart";
     let (footer, color) = match &ui.warning {
-        Some(w) => (w.as_str(), (241, 196, 15, 255)), // âmbar: atenção
+        Some(w) => (w.as_str(), (52, 152, 219, 255)), // azul: estado do OSD
         None => (hints, (120, 120, 130, 255)),
     };
     let fw = measure(font, footer, 12.0);
@@ -276,6 +277,20 @@ mod tests {
     fn embedded_font_loads() {
         let f = font();
         assert!(measure(f, "abc", 13.0) > 0.0);
+    }
+
+    #[test]
+    fn phase_colors_use_only_recording_green_and_state_blue() {
+        assert_eq!(phase_color(Phase::Recording), (46, 204, 113));
+        for phase in [
+            Phase::Paused,
+            Phase::Transcribing,
+            Phase::Loading,
+            Phase::Cleaning,
+            Phase::Error,
+        ] {
+            assert_eq!(phase_color(phase), (52, 152, 219));
+        }
     }
 
     #[test]

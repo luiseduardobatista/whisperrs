@@ -61,6 +61,11 @@ enum DaemonEvent {
     Audio(AudioChunk),
     AudioEnded(Option<String>),
     Worker(WorkerOutcome),
+    WorkerProgress {
+        session: u64,
+        phase: UiPhase,
+        status: String,
+    },
     EngineLoaded(Result<Arc<Engine>, String>),
 }
 
@@ -176,6 +181,11 @@ impl Daemon {
                     DaemonEvent::Audio(chunk) => self.handle_audio(chunk),
                     DaemonEvent::AudioEnded(err) => self.handle_audio_ended(err),
                     DaemonEvent::Worker(out) => self.handle_worker(out),
+                    DaemonEvent::WorkerProgress {
+                        session,
+                        phase,
+                        status,
+                    } => self.handle_worker_progress(session, phase, status),
                     DaemonEvent::EngineLoaded(res) => self.handle_engine_loaded(res),
                 },
                 Err(RecvTimeoutError::Timeout) => {}
@@ -320,6 +330,12 @@ impl Daemon {
             self.set_ui(UiPhase::Error, Some(msg));
             std::thread::sleep(Duration::from_millis(2000));
             self.cancel_session();
+        }
+    }
+
+    fn handle_worker_progress(&mut self, session: u64, phase: UiPhase, status: String) {
+        if self.phase == Phase::Transcribing && session == self.session {
+            self.set_ui(phase, Some(status));
         }
     }
 
@@ -474,7 +490,7 @@ impl Daemon {
                 return;
             }
         };
-        self.set_phase(Phase::Transcribing, Some("transcrevendo…".to_string()));
+        self.set_phase(Phase::Transcribing, Some("Transcrevendo".to_string()));
         let samples = std::mem::take(&mut self.buffer);
         let cfg = self.cfg.clone();
         let smart = self.smart_mode;
@@ -482,7 +498,7 @@ impl Daemon {
         let llm = Arc::clone(&self.llm);
         let tx = self.events_tx.clone();
         std::thread::spawn(move || {
-            let out = transcribe_worker(&engine, samples, &cfg, smart, session, llm);
+            let out = transcribe_worker(&engine, samples, &cfg, smart, session, llm, tx.clone());
             let _ = tx.send(DaemonEvent::Worker(out));
         });
     }
@@ -562,6 +578,7 @@ fn transcribe_worker(
     smart: bool,
     session: u64,
     llm: Arc<llm::Llm>,
+    progress_tx: Sender<DaemonEvent>,
 ) -> WorkerOutcome {
     let samples = match engine.filter_speech(samples) {
         Ok(s) => s,
@@ -589,6 +606,11 @@ fn transcribe_worker(
     };
     let fallback = rust_cleanup(&raw, cfg);
     let text = if use_ai(cfg, smart) {
+        let _ = progress_tx.send(DaemonEvent::WorkerProgress {
+            session,
+            phase: UiPhase::Cleaning,
+            status: "Transcrevendo".to_string(),
+        });
         match llm_process(cfg, smart, &raw, llm) {
             Ok(text) if plausible_no_think_ok(&raw, &text, smart) => text,
             Ok(_) => {
