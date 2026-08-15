@@ -52,14 +52,18 @@ src/
 ## Architecture
 
 ```
-whisper toggle ──socket──► daemon (loop principal, recv_timeout 1 s)
+whisper toggle ──socket──► daemon (loop principal, recv_timeout até 1 s)
                               ├─ thread OSD: wlr-layer-shell + teclas (Space/Enter/Esc/S)
                               ├─ thread captura: lê stdout do pw-record em blocos
                               └─ thread worker: VAD → whisper → Qwen/fallback → insert
 ```
 
 O daemon é um loop de eventos sem async: tudo é `std::thread` + canais
-`mpsc`. A CLI nunca fala com o OSD/áudio diretamente — só via IPC.
+`mpsc`. A CLI nunca fala com o OSD/áudio diretamente — só via IPC. Feedbacks
+temporários usam um deadline monotônico; o `recv_timeout` espera no máximo até
+essa deadline, sem bloquear o processamento de eventos. Eventos vindos de
+threads carregam o contador da sessão e são descartados quando pertencem a uma
+sessão antiga.
 
 ## IPC protocol
 
@@ -79,8 +83,10 @@ O daemon é um loop de eventos sem async: tudo é `std::thread` + canais
 ## State machine
 
 Fases do daemon (`daemon.rs`): `Idle → Loading → Recording ⇄ Paused →
-Transcribing → Idle`. O OSD tem a própria fase de UI (`osd.rs`: Loading,
-Recording, Paused, Transcribing, Error).
+Transcribing → Idle`. Erros e feedbacks temporários mantêm o daemon em `Idle`
+enquanto o OSD permanece visível até a deadline; isso deixa `status`,
+`cancel` e `stop` responsivos. O OSD tem a própria fase de UI (`osd.rs`:
+Loading, Recording, Paused, Transcribing, Error).
 
 Fluxo de uma sessão:
 
@@ -103,7 +109,8 @@ Fluxo de uma sessão:
 6. Evento `Closed` (emitido pela thread do OSD ao sair, após flush do
    destroy) → **só então** `insert::insert` digita na app focada → `Idle`.
 7. `Esc`/`cancel` → `cancel_session`: mata captura, fecha OSD, descarta
-   pendências.
+   pendências. Em erros ou feedbacks como `nada detectado`, o OSD é mantido
+   por uma deadline sem bloquear o loop; ao expirar, a sessão é cancelada.
 
 **Invariante crítico:** a inserção acontece depois do `Closed`. Enquanto o
 OSD está visível ele segura o foco de teclado — `wtype` digitando antes
@@ -224,7 +231,9 @@ como prova de fala para o VAD — só áudio real.
 ## Debugging
 
 - `whisper status` responde `idle`/`recording`/`paused`/`transcribing`/
-  `loading` — primeiro passo para saber onde o daemon está.
+  `loading` — primeiro passo para saber onde o daemon está. Durante um
+  feedback temporário, a sessão já está em `idle`, embora o OSD ainda mostre
+  a mensagem até a deadline.
 - `whisper daemon` em primeiro plano mostra stderr ao vivo (hot reload,
   erros de engine, falhas de inserção).
 - Falha de inserção não é visível no OSD (já fechado): olhe o
