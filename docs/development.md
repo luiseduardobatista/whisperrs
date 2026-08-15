@@ -34,7 +34,7 @@ daemon` em primeiro plano.
 
 ```
 src/
-  main.rs        # CLI (clap): start/stop/daemon/toggle/record/commit/cancel/pause/status/setup
+  main.rs        # CLI (clap): start/stop/restart/daemon/toggle/record/commit/cancel/pause/status/setup
   daemon.rs      # orquestrador: sessões, fases, hot reload, threads
   ipc.rs         # protocolo: socket Unix + JSON por linha
   config.rs      # config.toml, caminhos XDG, mtime (hot reload)
@@ -73,10 +73,15 @@ sessão antiga.
   `Loading`/`Transcribing` é no-op.
 - `record`: inicia em `Idle` e retoma em `Paused`; `commit` conclui;
   `cancel` descarta; `pause` pausa somente uma gravação.
-- Response: `{ "state": str, "error": str|null, "exe": str|null }`
-  — `exe` (só em `status`) é o caminho do binário do daemon; ausente em
-  daemons de versões antigas (campos desconhecidos do lado antigo são
-  ignorados na desserialização).
+- Response operacional: `{ "state": str, "error": str|null }`.
+- Response de `status` também pode conter `exe`, `language`, `model` e `smart`.
+  Todos são opcionais para manter compatibilidade com daemons antigos. `exe`
+  é o caminho do binário do daemon; `language` e `model` são os valores de
+  configuração aceitos pelo daemon; `smart` é o Smart Mode da sessão atual.
+- O CLI projeta essa resposta para `status --json`, adicionando
+  `{"daemon":"running"}`. Sem listener alcançável, retorna
+  `{"daemon":"stopped"}` com exit code `0`; falhas reais de permissão,
+  transporte ou parsing retornam exit code `1` e diagnóstico em stderr.
 - Socket órfão é removido na subida; um segundo daemon sai com erro (exit 1)
   em vez de ficar ocioso.
 
@@ -238,6 +243,12 @@ como prova de fala para o VAD — só áudio real.
   feedback terminal, a sessão já está em `idle`, embora o OSD ainda mostre
   a mensagem até a deadline. O aviso não fatal de Smart mantém o estado
   `recording`/`paused`.
+- `whisper status --json` emite somente JSON: `daemon` é `running` ou
+  `stopped`; quando está rodando, `state` é a fase pública e os metadados de
+  configuração/sessão podem aparecer. O estado `stopped` retorna exit code
+  `0`; falhas reais de transporte ou parsing retornam `1` em stderr.
+- `whisper stop` é idempotente e `whisper restart` espera o socket antigo
+  desaparecer antes de chamar `start`.
 - `whisper daemon` em primeiro plano mostra stderr ao vivo (hot reload,
   erros de engine, falhas de inserção).
 - Falha de inserção não é visível no OSD (já fechado): olhe o

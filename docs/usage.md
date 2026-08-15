@@ -9,8 +9,10 @@ com compositor/systemd e os problemas comuns.
 |---------|-----------|
 | `whisper setup [--lang pt\|en\|auto] [--model …] [--ai-model qwen3.5-0.8b]` | wizard: língua + modelos + download (gera o `config.toml`) |
 | `whisper start` | sobe o daemon em background; idempotente |
-| `whisper stop` | derruba o daemon (encerra sessão ativa e remove o socket) |
-| `whisper status` | mostra o estado do daemon (`idle`, `recording`, …) |
+| `whisper stop` | para o daemon; é sucesso se ele já estiver parado |
+| `whisper restart` | compõe `stop` e `start`, aguardando o socket antigo sair |
+| `whisper status` | mostra o estado humano do daemon (`idle`, `recording`, …) |
+| `whisper status --json` | emite status estável para scripts e status bars |
 | `whisper toggle` | inicia ou conclui a sessão; em `Loading`/`Transcribing`, não faz nada |
 | `whisper record` | inicia uma sessão ou retoma uma sessão pausada |
 | `whisper commit` | conclui a sessão em gravação/pausa |
@@ -27,10 +29,35 @@ devolver o shell, confirma que o daemon respondeu no socket; se não
 responder, mata o processo e aponta o log. Com o daemon já rodando, apenas
 avisa "já está rodando" e sai com sucesso.
 
-### stop
+### stop e restart
 
 `whisper stop` envia o comando `Stop` pelo socket. O daemon encerra a sessão
-ativa (captura e OSD), responde `stopping`, remove o socket e sai.
+ativa (captura e OSD), remove o socket e sai. Se o daemon já estiver parado,
+o comando retorna sucesso sem tratar isso como erro técnico.
+
+`whisper restart` reutiliza o mesmo lifecycle: solicita `stop`, aguarda o
+socket antigo desaparecer e executa `start`. Falhas reais de IPC ou startup
+retornam exit code `1`.
+
+### status
+
+O modo humano mostra o estado da sessão quando o daemon está disponível e
+`stopped` quando não há listener no socket. O modo JSON escreve exatamente um
+objeto em stdout, sem texto humano, ANSI ou avisos:
+
+```json
+{"daemon":"running","state":"recording","language":"pt","model":"turbo","smart":false,"exe":"/caminho/para/whisper"}
+```
+
+Campos `language`, `model`, `smart` e `exe` são opcionais para compatibilidade
+com daemons antigos. `smart` representa somente o Smart Mode da sessão atual;
+`language` é o idioma configurado (`pt`, `en` ou `auto`) e `model` é o modelo
+configurado, não uma garantia de que o engine já foi carregado. Se o daemon
+estiver parado, o JSON é `{"daemon":"stopped"}` e o exit code é `0`.
+
+Falhas de permissão, transporte, leitura ou parsing não são convertidas em
+`stopped`: stdout fica vazio, o diagnóstico vai para stderr e o exit code é
+`1`.
 
 ### setup
 
