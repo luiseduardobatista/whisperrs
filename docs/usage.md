@@ -70,7 +70,9 @@ Fluxo interno de uma sessão:
    visível ele segura o foco de teclado, e o `wtype` digitaria nele — por isso
    a inserção espera o OSD fechar.
 6. `Esc`/`cancel` descarta explicitamente a sessão, inclusive durante o
-   carregamento ou a transcrição.
+   carregamento ou a transcrição. Mensagens temporárias de erro ou de ausência
+   de fala permanecem no OSD pelo tempo planejado sem bloquear `status`,
+   `stop` ou novos comandos.
 
 A língua é forçada no modelo (mais rápido e preciso que auto-detect); `auto`
 deixa o whisper decidir. Acentos vêm do próprio modelo.

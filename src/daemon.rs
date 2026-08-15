@@ -12,7 +12,7 @@ use crate::transcribe::Engine;
 use anyhow::Result;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -77,6 +77,34 @@ fn command_action(phase: Phase, cmd: Cmd) -> CommandAction {
     }
 }
 
+const EVENT_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const AUDIO_FEEDBACK_DURATION: Duration = Duration::from_secs(2);
+const PROCESSING_FEEDBACK_DURATION: Duration = Duration::from_millis(2500);
+const EMPTY_FEEDBACK_DURATION: Duration = Duration::from_millis(1200);
+
+#[derive(Debug, Clone, Copy)]
+struct PendingFeedback {
+    session: u64,
+    deadline: Instant,
+}
+
+impl PendingFeedback {
+    fn new(session: u64, duration: Duration) -> Self {
+        Self {
+            session,
+            deadline: Instant::now() + duration,
+        }
+    }
+
+    fn is_expired(self, now: Instant) -> bool {
+        now >= self.deadline
+    }
+
+    fn remaining(self, now: Instant) -> Duration {
+        self.deadline.saturating_duration_since(now)
+    }
+}
+
 struct AudioChunk {
     samples: Vec<f32>,
     rms: f32,
@@ -99,16 +127,28 @@ impl WorkerOutcome {
 
 enum DaemonEvent {
     Ipc(Cmd, Sender<Response>),
-    Osd(OsdEvent),
-    Audio(AudioChunk),
-    AudioEnded(Option<String>),
+    Osd {
+        session: u64,
+        event: OsdEvent,
+    },
+    Audio {
+        session: u64,
+        chunk: AudioChunk,
+    },
+    AudioEnded {
+        session: u64,
+        error: Option<String>,
+    },
     Worker(WorkerOutcome),
     WorkerProgress {
         session: u64,
         phase: UiPhase,
         status: String,
     },
-    EngineLoaded(Result<Arc<Engine>, String>),
+    EngineLoaded {
+        session: u64,
+        result: Result<Arc<Engine>, String>,
+    },
 }
 
 struct Daemon {
@@ -128,8 +168,9 @@ struct Daemon {
     pending_insert: Option<String>,
     llm: Arc<llm::Llm>,
     smart_mode: bool,
-    /// Contador de sessões: descarta resultados de workers de sessões antigas.
+    /// Contador de sessões: descarta eventos assíncronos de sessões antigas.
     session: u64,
+    feedback: Option<PendingFeedback>,
     events_rx: Receiver<DaemonEvent>,
     events_tx: Sender<DaemonEvent>,
 }
@@ -162,6 +203,7 @@ pub fn run() -> Result<()> {
         llm: Arc::new(llm::Llm::default()),
         smart_mode: false,
         session: 0,
+        feedback: None,
         events_rx,
         events_tx,
     };
@@ -198,12 +240,23 @@ fn lang_model(cfg: &Config) -> String {
     format!("{} · {}", cfg.language.label(), cfg.model)
 }
 
+fn feedback_wait_duration(feedback: Option<PendingFeedback>, now: Instant) -> Duration {
+    feedback
+        .map(|feedback| feedback.remaining(now).min(EVENT_POLL_INTERVAL))
+        .unwrap_or(EVENT_POLL_INTERVAL)
+}
+
+fn should_retry_engine_reload(event_session: u64, current_session: u64, has_engine: bool) -> bool {
+    event_session != current_session && has_engine
+}
+
 impl Daemon {
     fn loop_forever(&mut self) {
         loop {
             self.reload_config_if_changed();
             self.reload_engine_if_pending();
-            match self.events_rx.recv_timeout(Duration::from_secs(1)) {
+            self.expire_feedback_if_due();
+            match self.events_rx.recv_timeout(self.event_wait_duration()) {
                 Ok(ev) => match ev {
                     DaemonEvent::Ipc(cmd, reply) => {
                         if matches!(cmd, Cmd::Stop) {
@@ -219,20 +272,42 @@ impl Daemon {
                         let resp = self.handle_cmd(cmd);
                         let _ = reply.send(resp);
                     }
-                    DaemonEvent::Osd(ev) => self.handle_osd(ev),
-                    DaemonEvent::Audio(chunk) => self.handle_audio(chunk),
-                    DaemonEvent::AudioEnded(err) => self.handle_audio_ended(err),
+                    DaemonEvent::Osd { session, event } => self.handle_osd(session, event),
+                    DaemonEvent::Audio { session, chunk } => self.handle_audio(session, chunk),
+                    DaemonEvent::AudioEnded { session, error } => {
+                        self.handle_audio_ended(session, error)
+                    }
                     DaemonEvent::Worker(out) => self.handle_worker(out),
                     DaemonEvent::WorkerProgress {
                         session,
                         phase,
                         status,
                     } => self.handle_worker_progress(session, phase, status),
-                    DaemonEvent::EngineLoaded(res) => self.handle_engine_loaded(res),
+                    DaemonEvent::EngineLoaded { session, result } => {
+                        self.handle_engine_loaded(session, result)
+                    }
                 },
-                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Timeout) => self.expire_feedback_if_due(),
                 Err(RecvTimeoutError::Disconnected) => break,
             }
+        }
+    }
+
+    fn event_wait_duration(&self) -> Duration {
+        feedback_wait_duration(self.feedback, Instant::now())
+    }
+
+    fn expire_feedback_if_due(&mut self) {
+        let now = Instant::now();
+        let Some(feedback) = self.feedback else {
+            return;
+        };
+        if !feedback.is_expired(now) {
+            return;
+        }
+        self.feedback = None;
+        if feedback.session == self.session {
+            self.cancel_session();
         }
     }
 
@@ -272,17 +347,21 @@ impl Daemon {
             return;
         }
         self.pending_engine_reload = false;
-        spawn_engine_load(&self.cfg, &self.events_tx);
+        spawn_engine_load(self.session, &self.cfg, &self.events_tx);
     }
 
     fn handle_cmd(&mut self, cmd: Cmd) -> Response {
-        match command_action(self.phase, cmd) {
-            CommandAction::Start => self.start_session(),
-            CommandAction::Resume => self.set_phase(Phase::Recording, None),
-            CommandAction::Commit => self.commit(),
-            CommandAction::Cancel => self.cancel_session(),
-            CommandAction::Pause => self.set_phase(Phase::Paused, None),
-            CommandAction::Noop => {}
+        if self.feedback.is_some() && matches!(cmd, Cmd::Cancel) {
+            self.cancel_session();
+        } else {
+            match command_action(self.phase, cmd) {
+                CommandAction::Start => self.start_session(),
+                CommandAction::Resume => self.set_phase(Phase::Recording, None),
+                CommandAction::Commit => self.commit(),
+                CommandAction::Cancel => self.cancel_session(),
+                CommandAction::Pause => self.set_phase(Phase::Paused, None),
+                CommandAction::Noop => {}
+            }
         }
         let mut resp = Response {
             state: self.state_str().to_string(),
@@ -310,7 +389,11 @@ impl Daemon {
         }
     }
 
-    fn handle_osd(&mut self, ev: OsdEvent) {
+    fn handle_osd(&mut self, session: u64, ev: OsdEvent) {
+        if session != self.session {
+            eprintln!("whisper: evento do OSD descartado (sessão antiga)");
+            return;
+        }
         match ev {
             OsdEvent::PauseToggle => match self.phase {
                 Phase::Recording => self.set_phase(Phase::Paused, None),
@@ -346,14 +429,18 @@ impl Daemon {
         }
     }
 
-    fn handle_audio(&mut self, chunk: AudioChunk) {
-        if self.phase == Phase::Recording {
+    fn handle_audio(&mut self, session: u64, chunk: AudioChunk) {
+        if session == self.session && self.phase == Phase::Recording {
             self.buffer.extend_from_slice(&chunk.samples);
             self.ui.lock().unwrap().push_level(chunk.rms);
         }
     }
 
-    fn handle_audio_ended(&mut self, err: Option<String>) {
+    fn handle_audio_ended(&mut self, session: u64, err: Option<String>) {
+        if session != self.session {
+            eprintln!("whisper: fim de áudio descartado (sessão antiga)");
+            return;
+        }
         if matches!(self.phase, Phase::Recording | Phase::Paused) {
             // Sem detalhe do pw-record? Lê o stderr (ex.: "no target node available").
             let detail = match (&mut self.capture, err) {
@@ -366,9 +453,7 @@ impl Daemon {
             } else {
                 format!("áudio indisponível: {detail}")
             };
-            self.set_ui(UiPhase::Error, Some(msg));
-            std::thread::sleep(Duration::from_millis(2000));
-            self.cancel_session();
+            self.show_feedback(msg, AUDIO_FEEDBACK_DURATION);
         }
     }
 
@@ -395,14 +480,20 @@ impl Daemon {
                 self.close_osd();
             }
             WorkerOutcome::Failed { msg, .. } => {
-                self.set_ui(UiPhase::Error, Some(msg));
-                std::thread::sleep(Duration::from_millis(2500));
-                self.finish_session(None);
+                self.show_feedback(msg, PROCESSING_FEEDBACK_DURATION);
             }
         }
     }
 
-    fn handle_engine_loaded(&mut self, res: Result<Arc<Engine>, String>) {
+    fn handle_engine_loaded(&mut self, session: u64, res: Result<Arc<Engine>, String>) {
+        if session != self.session {
+            if should_retry_engine_reload(session, self.session, self.engine.is_some()) {
+                // Reagenda o hot reload; a configuração antiga não deve sobrescrever a atual.
+                self.pending_engine_reload = true;
+            }
+            eprintln!("whisper: modelo descartado (sessão antiga)");
+            return;
+        }
         match res {
             Ok(engine) => {
                 if !engine.vad_available() {
@@ -425,9 +516,10 @@ impl Daemon {
             }
             Err(err) => {
                 if self.phase == Phase::Loading {
-                    self.set_ui(UiPhase::Error, Some(format!("modelo indisponível: {err}")));
-                    std::thread::sleep(Duration::from_millis(2500));
-                    self.cancel_session();
+                    self.show_feedback(
+                        format!("modelo indisponível: {err}"),
+                        PROCESSING_FEEDBACK_DURATION,
+                    );
                 } else if self.phase == Phase::Idle {
                     eprintln!("whisper: falha ao recarregar modelo, mantendo o atual: {err}");
                 }
@@ -436,6 +528,9 @@ impl Daemon {
     }
 
     fn start_session(&mut self) {
+        self.close_osd();
+        self.feedback = None;
+        self.pending_insert = None;
         self.session = self.session.wrapping_add(1);
         self.smart_mode = false;
         let ui = UiState::new(lang_model(&self.cfg));
@@ -447,9 +542,10 @@ impl Daemon {
         let (osd_ev_tx, osd_ev_rx) = channel::<OsdEvent>();
         let ui = self.ui.clone();
         let daemon_tx = self.events_tx.clone();
+        let session = self.session;
         std::thread::spawn(move || {
-            while let Ok(ev) = osd_ev_rx.recv() {
-                if daemon_tx.send(DaemonEvent::Osd(ev)).is_err() {
+            while let Ok(event) = osd_ev_rx.recv() {
+                if daemon_tx.send(DaemonEvent::Osd { session, event }).is_err() {
                     break;
                 }
             }
@@ -467,7 +563,7 @@ impl Daemon {
 
         if self.engine.is_none() {
             self.set_phase(Phase::Loading, Some("carregando modelo…".to_string()));
-            spawn_engine_load(&self.cfg, &self.events_tx);
+            spawn_engine_load(self.session, &self.cfg, &self.events_tx);
         } else {
             self.set_phase(Phase::Recording, None);
             self.start_capture();
@@ -475,6 +571,7 @@ impl Daemon {
     }
 
     fn start_capture(&mut self) {
+        let session = self.session;
         match Capture::start(self.cfg.source.as_deref()) {
             Ok((capture, stdout)) => {
                 self.capture = Some(capture);
@@ -485,18 +582,27 @@ impl Daemon {
                         match audio::read_chunk(&mut stdout) {
                             Ok((samples, rms)) if !samples.is_empty() => {
                                 if tx
-                                    .send(DaemonEvent::Audio(AudioChunk { samples, rms }))
+                                    .send(DaemonEvent::Audio {
+                                        session,
+                                        chunk: AudioChunk { samples, rms },
+                                    })
                                     .is_err()
                                 {
                                     break;
                                 }
                             }
                             Ok(_) => {
-                                let _ = tx.send(DaemonEvent::AudioEnded(None));
+                                let _ = tx.send(DaemonEvent::AudioEnded {
+                                    session,
+                                    error: None,
+                                });
                                 break;
                             }
                             Err(e) => {
-                                let _ = tx.send(DaemonEvent::AudioEnded(Some(e.to_string())));
+                                let _ = tx.send(DaemonEvent::AudioEnded {
+                                    session,
+                                    error: Some(e.to_string()),
+                                });
                                 break;
                             }
                         }
@@ -504,9 +610,7 @@ impl Daemon {
                 });
             }
             Err(e) => {
-                self.set_ui(UiPhase::Error, Some(format!("áudio: {e:#}")));
-                std::thread::sleep(Duration::from_millis(2000));
-                self.cancel_session();
+                self.show_feedback(format!("áudio: {e:#}"), AUDIO_FEEDBACK_DURATION);
             }
         }
     }
@@ -596,17 +700,24 @@ impl Daemon {
         self.stop_capture();
         self.close_osd();
         self.pending_insert = None;
+        self.feedback = None;
         self.phase = Phase::Idle;
     }
 
-    fn finish_session(&mut self, msg: Option<String>) {
+    fn show_feedback(&mut self, msg: String, duration: Duration) {
         self.stop_capture();
-        if let Some(msg) = msg {
-            self.set_ui(UiPhase::Error, Some(msg));
-            std::thread::sleep(Duration::from_millis(1200));
-        }
-        self.close_osd();
+        self.pending_insert = None;
         self.phase = Phase::Idle;
+        self.set_ui(UiPhase::Error, Some(msg));
+        self.feedback = Some(PendingFeedback::new(self.session, duration));
+    }
+
+    fn finish_session(&mut self, msg: Option<String>) {
+        if let Some(msg) = msg {
+            self.show_feedback(msg, EMPTY_FEEDBACK_DURATION);
+        } else {
+            self.cancel_session();
+        }
     }
 }
 
@@ -697,7 +808,7 @@ fn plausible_no_think_ok(raw: &str, out: &str, smart: bool) -> bool {
 }
 
 /// Sobe o engine em background (primeira sessão ou hot reload da config).
-fn spawn_engine_load(cfg: &Config, tx: &Sender<DaemonEvent>) {
+fn spawn_engine_load(session: u64, cfg: &Config, tx: &Sender<DaemonEvent>) {
     let cfg = cfg.clone();
     let tx = tx.clone();
     std::thread::spawn(move || {
@@ -709,7 +820,10 @@ fn spawn_engine_load(cfg: &Config, tx: &Sender<DaemonEvent>) {
         )
         .map(Arc::new)
         .map_err(|e| format!("{e:#}"));
-        let _ = tx.send(DaemonEvent::EngineLoaded(res));
+        let _ = tx.send(DaemonEvent::EngineLoaded {
+            session,
+            result: res,
+        });
     });
 }
 
@@ -743,6 +857,117 @@ fn compose_warning(wtype_missing: bool, vad_missing: bool, ai_missing: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feedback_deadline_is_not_expired_before_duration() {
+        let now = Instant::now();
+        let feedback = PendingFeedback {
+            session: 1,
+            deadline: now + Duration::from_secs(1),
+        };
+
+        assert!(!feedback.is_expired(now));
+    }
+
+    #[test]
+    fn feedback_deadline_expires_after_duration() {
+        let now = Instant::now();
+        let feedback = PendingFeedback {
+            session: 1,
+            deadline: now + Duration::from_secs(1),
+        };
+
+        assert!(feedback.is_expired(now + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn cancelled_feedback_returns_to_regular_event_polling() {
+        assert_eq!(
+            feedback_wait_duration(None, Instant::now()),
+            EVENT_POLL_INTERVAL
+        );
+    }
+
+    fn test_daemon(session: u64, phase: Phase) -> Daemon {
+        let (events_tx, events_rx) = channel();
+        Daemon {
+            cfg: Config::default(),
+            cfg_mtime: None,
+            pending_engine_reload: false,
+            phase,
+            engine: None,
+            buffer: Vec::new(),
+            capture: None,
+            ui: Arc::new(Mutex::new(UiState::new("pt · turbo".to_string()))),
+            osd: None,
+            pending_insert: None,
+            llm: Arc::new(llm::Llm::default()),
+            smart_mode: false,
+            session,
+            feedback: None,
+            events_rx,
+            events_tx,
+        }
+    }
+
+    #[test]
+    fn stale_hot_reload_is_retried_when_engine_exists() {
+        assert!(should_retry_engine_reload(1, 2, true));
+    }
+
+    #[test]
+    fn stale_initial_engine_load_is_not_retried_without_engine() {
+        assert!(!should_retry_engine_reload(1, 2, false));
+    }
+
+    #[test]
+    fn stale_audio_chunk_does_not_enter_current_session() {
+        let mut daemon = test_daemon(2, Phase::Recording);
+        daemon.handle_audio(
+            1,
+            AudioChunk {
+                samples: vec![1.0, 2.0],
+                rms: 0.5,
+            },
+        );
+
+        assert!(daemon.buffer.is_empty());
+    }
+
+    #[test]
+    fn stale_osd_close_does_not_cancel_current_session() {
+        let mut daemon = test_daemon(2, Phase::Transcribing);
+        daemon.pending_insert = Some("texto atual".to_string());
+        daemon.handle_osd(1, OsdEvent::Closed);
+
+        assert_eq!(daemon.pending_insert.as_deref(), Some("texto atual"));
+    }
+
+    #[test]
+    fn cancel_clears_feedback_before_deadline() {
+        let mut daemon = test_daemon(1, Phase::Idle);
+        daemon.feedback = Some(PendingFeedback {
+            session: 1,
+            deadline: Instant::now() + Duration::from_secs(1),
+        });
+
+        daemon.handle_cmd(Cmd::Cancel);
+
+        assert!(daemon.feedback.is_none());
+    }
+
+    #[test]
+    fn expired_feedback_returns_to_idle() {
+        let mut daemon = test_daemon(1, Phase::Recording);
+        daemon.feedback = Some(PendingFeedback {
+            session: 1,
+            deadline: Instant::now() - Duration::from_secs(1),
+        });
+
+        daemon.expire_feedback_if_due();
+
+        assert_eq!(daemon.phase, Phase::Idle);
+    }
 
     #[test]
     fn idle_has_no_ui_phase() {
