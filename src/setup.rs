@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 
 const LANG_ITEMS: [&str; 3] = ["Português", "Inglês", "Detectar automaticamente"];
 
-const INSERT_ITEMS: [&str; 3] = [
+const INSERT_ITEMS: [&str; 4] = [
+    "Digitar automaticamente; clipboard só se falhar (recomendado)",
     "Digitar automaticamente",
     "Somente copiar para o clipboard",
     "Digitar e copiar para o clipboard",
@@ -187,26 +188,27 @@ fn select_insert_mode(
 }
 
 fn parse_insert_mode(value: &str) -> Result<InsertMode> {
-    match value {
-        "type" => Ok(InsertMode::Type),
-        "clipboard" => Ok(InsertMode::Clipboard),
-        "both" => Ok(InsertMode::Both),
-        other => bail!("modo de inserção inválido: {other} (use type, clipboard ou both)"),
-    }
+    InsertMode::parse(value).ok_or_else(|| {
+        anyhow::anyhow!(
+            "modo de inserção inválido: {value} (use insert, clipboard, fallback ou both; type é alias legado)"
+        )
+    })
 }
 
 fn insert_mode_index(mode: InsertMode) -> usize {
     match mode {
-        InsertMode::Type => 0,
-        InsertMode::Clipboard => 1,
-        InsertMode::Both => 2,
+        InsertMode::Fallback => 0,
+        InsertMode::InsertText => 1,
+        InsertMode::CopyToClipboard => 2,
+        InsertMode::Both => 3,
     }
 }
 
 fn insert_mode_at(index: usize) -> InsertMode {
     match index {
-        0 => InsertMode::Type,
-        1 => InsertMode::Clipboard,
+        0 => InsertMode::Fallback,
+        1 => InsertMode::InsertText,
+        2 => InsertMode::CopyToClipboard,
         _ => InsertMode::Both,
     }
 }
@@ -428,9 +430,7 @@ fn print_completion(plan: &SetupPlan, report: &DownloadReport) {
         );
     }
 
-    if matches!(plan.cfg.insert_mode, InsertMode::Type | InsertMode::Both)
-        && !insert::wtype_available()
-    {
+    if plan.cfg.insert_mode.uses_wtype() && !insert::wtype_available() {
         println!();
         println!("aviso: 'wtype' não está no PATH — a digitação na app focada não vai funcionar");
         println!("  o texto ficará só no clipboard. {}", insert::wtype_hint());
@@ -464,17 +464,28 @@ mod tests {
 
     #[test]
     fn insert_mode_values_have_stable_meaning() {
-        assert_eq!(parse_insert_mode("type").unwrap(), InsertMode::Type);
+        assert_eq!(parse_insert_mode("insert").unwrap(), InsertMode::InsertText);
+        assert_eq!(parse_insert_mode("type").unwrap(), InsertMode::InsertText);
         assert_eq!(
             parse_insert_mode("clipboard").unwrap(),
-            InsertMode::Clipboard
+            InsertMode::CopyToClipboard
         );
+        assert_eq!(parse_insert_mode("fallback").unwrap(), InsertMode::Fallback);
         assert_eq!(parse_insert_mode("both").unwrap(), InsertMode::Both);
+
+        for mode in [
+            InsertMode::Fallback,
+            InsertMode::InsertText,
+            InsertMode::CopyToClipboard,
+            InsertMode::Both,
+        ] {
+            assert_eq!(insert_mode_at(insert_mode_index(mode)), mode);
+        }
     }
 
     #[test]
     fn invalid_insert_mode_is_rejected() {
-        assert!(parse_insert_mode("fallback").is_err());
+        assert!(parse_insert_mode("invalid").is_err());
     }
 
     #[test]

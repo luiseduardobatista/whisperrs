@@ -51,7 +51,7 @@ src/
   postprocess.rs # rms, remove_fillers, fix_punctuation (puros)
   osd.rs         # integração Wayland: superfícies, teclado e buffer SHM
   osd_draw.rs    # desenho puro do cartão (tiny-skia + ab_glyph)
-  insert.rs      # inserção: wtype (digita) + wl-copy (clipboard)
+  insert.rs      # inserção: wtype, wl-copy e fallback explícito
 ```
 
 ## Architecture
@@ -259,8 +259,9 @@ como prova de fala para o VAD — só áudio real.
 - `whisper daemon` em primeiro plano mostra stderr ao vivo (hot reload,
   erros de engine, falhas de inserção).
 - Falha de inserção não é visível no OSD (já fechado): olhe o
-  `daemon.log` (`inserção falhou: ...`); quando a cópia funcionar apesar da
-  digitação, o erro avisa que o texto ficou no clipboard.
+  `daemon.log`. No modo `fallback`, uma falha do `wtype` seguida de cópia
+  bem-sucedida é registrada como fallback esperado, não como falha total; se
+  as duas operações falharem, o log registra o erro real.
 - `whisper status` mostra também o binário do daemon (`daemon: ...`) — se
   ele não for o esperado, `whisper start` já reinicia com o binário atual.
 - Se `wtype` estiver ausente do PATH, `whisper start` avisa no console e o

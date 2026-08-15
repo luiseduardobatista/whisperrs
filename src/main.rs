@@ -21,7 +21,7 @@ use std::os::unix::process::CommandExt;
 use std::process::{Command as Proc, Stdio};
 use std::time::Duration;
 
-use crate::config::{Config, InsertMode};
+use crate::config::Config;
 
 #[derive(Parser)]
 #[command(
@@ -261,9 +261,7 @@ fn start() -> Result<()> {
             println!("whisper rodando (log: {})", log.display());
             // Aviso imediato no console: o aviso do daemon só aparece no log.
             let cfg = Config::load().unwrap_or_default();
-            if matches!(cfg.insert_mode, InsertMode::Type | InsertMode::Both)
-                && !insert::wtype_available()
-            {
+            if cfg.insert_mode.uses_wtype() && !insert::wtype_available() {
                 eprintln!(
                     "aviso: wtype não encontrado no PATH — {}",
                     insert::wtype_hint()

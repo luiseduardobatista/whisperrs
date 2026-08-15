@@ -35,23 +35,42 @@ impl Language {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum InsertMode {
-    /// Digita o texto na app focada (wtype).
-    Type,
-    /// Copia o texto para o clipboard (wl-copy).
-    Clipboard,
-    /// Digita e também copia (fallback manual).
+    #[serde(rename = "insert", alias = "type")]
+    InsertText,
+    #[serde(rename = "clipboard")]
+    CopyToClipboard,
+    #[serde(rename = "fallback")]
+    Fallback,
+    #[serde(rename = "both")]
     Both,
 }
 
 impl InsertMode {
     pub fn label(self) -> &'static str {
         match self {
-            InsertMode::Type => "Digitar automaticamente",
-            InsertMode::Clipboard => "Somente copiar para o clipboard",
+            InsertMode::InsertText => "Digitar automaticamente",
+            InsertMode::CopyToClipboard => "Somente copiar para o clipboard",
+            InsertMode::Fallback => "Digitar automaticamente; clipboard só se falhar (recomendado)",
             InsertMode::Both => "Digitar e copiar para o clipboard",
         }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "insert" | "type" => Some(InsertMode::InsertText),
+            "clipboard" => Some(InsertMode::CopyToClipboard),
+            "fallback" => Some(InsertMode::Fallback),
+            "both" => Some(InsertMode::Both),
+            _ => None,
+        }
+    }
+
+    pub fn uses_wtype(self) -> bool {
+        matches!(
+            self,
+            InsertMode::InsertText | InsertMode::Fallback | InsertMode::Both
+        )
     }
 }
 
@@ -99,7 +118,7 @@ impl Default for Config {
         Config {
             language: Language::Pt,
             model: DEFAULT_MODEL.to_string(),
-            insert_mode: InsertMode::Both,
+            insert_mode: InsertMode::Fallback,
             remove_fillers: true,
             punctuation: true,
             final_period: true,
@@ -201,9 +220,39 @@ mod tests {
         assert_eq!(cfg.language, Language::Pt);
         assert_eq!(cfg.model, DEFAULT_MODEL);
         assert!(cfg.punctuation);
-        assert_eq!(cfg.insert_mode, InsertMode::Both);
+        assert_eq!(cfg.insert_mode, InsertMode::Fallback);
         assert!(!cfg.ai.enabled);
         assert_eq!(cfg.ai, AiConfig::default());
+    }
+
+    #[test]
+    fn insert_mode_reports_when_wtype_is_needed() {
+        assert!(InsertMode::InsertText.uses_wtype());
+        assert!(InsertMode::Fallback.uses_wtype());
+        assert!(InsertMode::Both.uses_wtype());
+        assert!(!InsertMode::CopyToClipboard.uses_wtype());
+    }
+
+    #[test]
+    fn insert_mode_accepts_legacy_alias_and_serializes_canonical_value() {
+        let cfg: Config = toml::from_str("insert_mode = \"type\"").unwrap();
+        assert_eq!(cfg.insert_mode, InsertMode::InsertText);
+
+        let serialized = toml::to_string(&cfg).unwrap();
+        assert!(serialized.contains("insert_mode = \"insert\""));
+    }
+
+    #[test]
+    fn insert_mode_parses_all_canonical_values() {
+        for (value, expected) in [
+            ("insert", InsertMode::InsertText),
+            ("clipboard", InsertMode::CopyToClipboard),
+            ("fallback", InsertMode::Fallback),
+            ("both", InsertMode::Both),
+        ] {
+            let cfg: Config = toml::from_str(&format!("insert_mode = \"{value}\"")).unwrap();
+            assert_eq!(cfg.insert_mode, expected);
+        }
     }
 
     #[test]

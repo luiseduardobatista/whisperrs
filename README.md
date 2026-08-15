@@ -60,8 +60,8 @@ focada.
 - Pós-processamento: remoção de fillers ("hmm", "ahn"…),
   capitalização/pontuação e período final; opcionalmente Qwen3.5-0.8B local
   via `llama-server` (com fallback automático para o cleanup Rust).
-- Inserção: `wtype` digita na app focada + `wl-copy` coloca no clipboard
-  (modo configurável; se o `wtype` falhar, o texto está no clipboard).
+- Inserção: `wtype` digita na app focada e `wl-copy` pode copiar o texto
+  (modo configurável; o padrão preserva o clipboard e só copia se `wtype` falhar).
 - OSD em `wlr-layer-shell` (Niri, Sway, Hyprland, KDE ≥ 6.3, COSMIC) com
   fallback para janela xdg-toplevel (GNOME). Sem suporte a X11.
 

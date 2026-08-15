@@ -7,7 +7,7 @@ com compositor/systemd e os problemas comuns.
 
 | Comando | Descrição |
 |---------|-----------|
-| `whisper setup [--lang pt\|en\|auto] [--model …] [--insert-mode type\|clipboard\|both] [--ai-model …\|--no-ai] [--yes]` | onboarding: escolhas, resumo e download (gera o `config.toml`) |
+| `whisper setup [--lang pt\|en\|auto] [--model …] [--insert-mode insert\|clipboard\|fallback\|both] [--ai-model …\|--no-ai] [--yes]` | onboarding: escolhas, resumo e download (gera o `config.toml`) |
 | `whisper start` | sobe o daemon em background; idempotente |
 | `whisper stop` | para o daemon; é sucesso se ele já estiver parado |
 | `whisper restart` | compõe `stop` e `start`, aguardando o socket antigo sair |
@@ -69,7 +69,7 @@ O resumo mostra os componentes ausentes e o tamanho aproximado antes de baixar.
 Flags disponíveis:
 
 - `--lang pt|en|auto` e `--model ...` pulam essas escolhas;
-- `--insert-mode type|clipboard|both` define como o texto será entregue;
+- `--insert-mode insert|clipboard|fallback|both` define como o texto será entregue (`type` continua aceito como alias legado);
 - `--ai-model qwen3.5-0.8b` habilita o Qwen e inclui seu download;
 - `--no-ai` desabilita o Qwen sem baixá-lo;
 - `--yes` aceita o resumo sem confirmação e nunca inicia o daemon.
@@ -77,7 +77,7 @@ Flags disponíveis:
 Para uso não interativo, forneça todas as escolhas ou use `--yes`, por exemplo:
 
 ```sh
-whisper setup --lang pt --model small --insert-mode both --no-ai --yes
+whisper setup --lang pt --model small --insert-mode fallback --no-ai --yes
 ```
 
 Sem flags de AI, o modo interativo pergunta e começa com Qwen desativado quando
@@ -108,10 +108,11 @@ Fluxo interno de uma sessão:
    transcreve em batch (Vulkan, ~1 s no turbo).
 4. Pós-processamento: corte de silêncio, remoção de fillers,
    capitalização/pontuação e período final (configurável).
-5. O OSD fecha e **só então** o texto é digitado na app focada (`wtype`) e
-   copiado para o clipboard (`wl-copy`). A ordem importa: enquanto o OSD está
-   visível ele segura o foco de teclado, e o `wtype` digitaria nele — por isso
-   a inserção espera o OSD fechar.
+5. O OSD fecha e **só então** o texto é entregue conforme `insert_mode`. No
+   padrão `fallback`, ele é digitado na app focada (`wtype`) e só vai para o
+   clipboard (`wl-copy`) se a digitação falhar. `both` mantém a cópia sempre.
+   A ordem importa: enquanto o OSD está visível ele segura o foco de teclado,
+   e o `wtype` digitaria nele — por isso a inserção espera o OSD fechar.
 6. `Esc`/`cancel` descarta explicitamente a sessão, inclusive durante o
    carregamento ou a transcrição. Mensagens temporárias de erro ou de ausência
    de fala permanecem no OSD pelo tempo planejado sem bloquear `status`,
@@ -165,7 +166,7 @@ encontre `libvulkan`/`libxkbcommon` em runtime).
 | OSD mostra "modelo indisponível" | modelo não baixado | `whisper setup` |
 | OSD mostra "áudio indisponível" | sem microfone / sem PipeWire | confira `pw-record` e a fonte (`source` na config) |
 | "nada detectado" | silêncio na gravação | fale mais alto/próximo do microfone |
-| Texto só no clipboard, não na app | `wtype` falhou (ex.: app sem foco de teclado) | o texto está no clipboard (modo `both`); veja `~/.local/state/whisper/daemon.log` |
+| Texto só no clipboard, não na app | `wtype` falhou (ex.: app sem foco de teclado) | o texto está no clipboard (modo `fallback` ou `both`); veja `~/.local/state/whisper/daemon.log` |
 | Nada acontece ao rodar `whisper daemon` | é um serviço de primeiro plano silencioso | normal: use `whisper start`/`status` |
 | OSD não aparece | X11 | o whisper não suporta X11; use um compositor Wayland |
 

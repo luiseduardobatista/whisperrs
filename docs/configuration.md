@@ -9,7 +9,7 @@ aplica mudanças em ~1 s, sem reiniciar (hot reload).
 ```toml
 language = "pt"        # pt | en | auto
 model = "small"        # recomendado; tiny | base | small | medium | large-v3 | turbo
-insert_mode = "both"   # type | clipboard | both
+insert_mode = "fallback" # insert | clipboard | fallback | both
 remove_fillers = true  # remove "hmm", "ahn"…
 punctuation = true     # capitaliza frases e normaliza espaços
 final_period = true    # garante ponto final
@@ -29,7 +29,7 @@ cleanup = true                  # pós-processa também sem o modo smart
 |-------|---------|---------|--------|
 | `language` | `pt` / `en` / `auto` | `pt` | língua forçada na transcrição; `auto` deixa o whisper detectar |
 | `model` | `tiny`…`turbo` | `small` | modelo whisper.cpp; `small` é o recomendado pelo setup (ver [Modelos](#modelos)) |
-| `insert_mode` | `type` / `clipboard` / `both` | `both` | digita na app (`wtype`), copia (`wl-copy`) ou ambos |
+| `insert_mode` | `insert` / `clipboard` / `fallback` / `both` | `fallback` | digita, copia, usa clipboard só se necessário ou faz ambos |
 | `remove_fillers` | `true` / `false` | `true` | remove fillers ("hmm", "ahn"…) |
 | `punctuation` | `true` / `false` | `true` | capitaliza frases e normaliza espaços |
 | `final_period` | `true` / `false` | `true` | garante ponto final |
@@ -41,6 +41,10 @@ cleanup = true                  # pós-processa também sem o modo smart
 | `ai.context_size` | inteiro | `2048` | contexto passado ao `llama-server` |
 | `ai.gpu` | booleano | `true` | tenta carregar as camadas na GPU e cai para CPU se necessário |
 | `ai.cleanup` | booleano | `true` | usa Qwen no cleanup normal; o modo smart tenta Qwen sempre que habilitado |
+
+`insert_mode = "type"` continua aceito como alias legado de `"insert"`. Configurações
+existentes com `"both"` preservam o comportamento anterior; o novo padrão só se
+aplica quando o campo está ausente.
 
 ## Detecção de voz (VAD)
 
