@@ -86,7 +86,8 @@ Fases do daemon (`daemon.rs`): `Idle → Loading → Recording ⇄ Paused →
 Transcribing → Idle`. Erros e feedbacks temporários mantêm o daemon em `Idle`
 enquanto o OSD permanece visível até a deadline; isso deixa `status`,
 `cancel` e `stop` responsivos. O OSD tem a própria fase de UI (`osd.rs`:
-Loading, Recording, Paused, Transcribing, Error).
+Loading, Recording, Paused, Transcribing, Info, Warning, Error). Feedbacks
+informativos e avisos usam cores próprias; falhas reais usam `Error`.
 
 Fluxo de uma sessão:
 
@@ -111,6 +112,8 @@ Fluxo de uma sessão:
 7. `Esc`/`cancel` → `cancel_session`: mata captura, fecha OSD, descarta
    pendências. Em erros ou feedbacks como `nada detectado`, o OSD é mantido
    por uma deadline sem bloquear o loop; ao expirar, a sessão é cancelada.
+   O aviso de Smart indisponível é não fatal: mantém `Recording`/`Paused`,
+   deixa as ações disponíveis e desaparece na própria deadline.
 
 **Invariante crítico:** a inserção acontece depois do `Closed`. Enquanto o
 OSD está visível ele segura o foco de teclado — `wtype` digitando antes
@@ -232,8 +235,9 @@ como prova de fala para o VAD — só áudio real.
 
 - `whisper status` responde `idle`/`recording`/`paused`/`transcribing`/
   `loading` — primeiro passo para saber onde o daemon está. Durante um
-  feedback temporário, a sessão já está em `idle`, embora o OSD ainda mostre
-  a mensagem até a deadline.
+  feedback terminal, a sessão já está em `idle`, embora o OSD ainda mostre
+  a mensagem até a deadline. O aviso não fatal de Smart mantém o estado
+  `recording`/`paused`.
 - `whisper daemon` em primeiro plano mostra stderr ao vivo (hot reload,
   erros de engine, falhas de inserção).
 - Falha de inserção não é visível no OSD (já fechado): olhe o

@@ -50,15 +50,32 @@ pub enum Phase {
     Transcribing,
     Loading,
     Cleaning,
+    Info,
+    Warning,
     Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedbackKind {
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Feedback {
+    pub kind: FeedbackKind,
+    pub message: String,
 }
 
 /// Estado compartilhado da UI: o daemon escreve, o OSD lê a cada frame.
 pub struct UiState {
     pub phase: Phase,
     pub status: Option<String>,
-    /// Aviso persistente exibido no rodapé do cartão (ex.: wtype ausente).
+    /// Aviso persistente exibido no centro do cartão (ex.: wtype ausente).
     pub warning: Option<String>,
+    /// Feedback temporário que não necessariamente encerra a sessão.
+    pub feedback: Option<Feedback>,
     /// Indica que o próximo ditado pode conter uma instrução de transformação.
     pub smart: bool,
     pub levels: VecDeque<f32>,
@@ -71,6 +88,7 @@ impl UiState {
             phase: Phase::Loading,
             status: None,
             warning: None,
+            feedback: None,
             smart: false,
             levels: VecDeque::new(),
             lang_model,

@@ -54,7 +54,7 @@ abre na borda inferior da tela com a waveform ao vivo:
 | `Space` | pausar/retomar a gravação |
 | `Enter` | concluir: transcreve, insere na app focada e fecha |
 | `Esc` | cancelar e descartar |
-| `S` | alternar o modo smart do Qwen |
+| `S` | alternar o modo Smart quando Qwen estiver disponível |
 
 Fluxo interno de uma sessão:
 
@@ -72,7 +72,8 @@ Fluxo interno de uma sessão:
 6. `Esc`/`cancel` descarta explicitamente a sessão, inclusive durante o
    carregamento ou a transcrição. Mensagens temporárias de erro ou de ausência
    de fala permanecem no OSD pelo tempo planejado sem bloquear `status`,
-   `stop` ou novos comandos.
+   `stop` ou novos comandos. Se o Smart Mode estiver indisponível, o aviso é
+   temporário e a gravação continua ativa.
 
 A língua é forçada no modelo (mais rápido e preciso que auto-detect); `auto`
 deixa o whisper decidir. Acentos vêm do próprio modelo.
