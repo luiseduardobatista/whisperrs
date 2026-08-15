@@ -12,7 +12,7 @@
 use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
@@ -115,6 +115,7 @@ struct App {
     ui: Arc<Mutex<UiState>>,
     events_tx: Sender<OsdEvent>,
     commands_rx: Receiver<OsdCommand>,
+    animation_start: Instant,
 }
 
 enum SurfaceKind {
@@ -203,6 +204,7 @@ pub fn run(
         ui,
         events_tx,
         commands_rx,
+        animation_start: Instant::now(),
     };
 
     loop {
@@ -527,6 +529,7 @@ impl App {
                 Transform::from_scale(s as f32, s as f32),
                 &ui,
                 font(),
+                self.animation_start.elapsed().as_secs_f32(),
             );
         }
         swap_red_blue(canvas);
