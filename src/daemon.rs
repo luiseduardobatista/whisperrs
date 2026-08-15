@@ -6,7 +6,7 @@ use crate::insert;
 use crate::ipc::{self, Cmd, Response};
 use crate::llm;
 use crate::model;
-use crate::osd::{OsdCommand, OsdEvent, Phase as UiPhase, UiState};
+use crate::osd::{Feedback, FeedbackKind, OsdCommand, OsdEvent, Phase as UiPhase, UiState};
 use crate::postprocess;
 use crate::transcribe::Engine;
 use anyhow::Result;
@@ -81,18 +81,21 @@ const EVENT_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const AUDIO_FEEDBACK_DURATION: Duration = Duration::from_secs(2);
 const PROCESSING_FEEDBACK_DURATION: Duration = Duration::from_millis(2500);
 const EMPTY_FEEDBACK_DURATION: Duration = Duration::from_millis(1200);
+const SMART_FEEDBACK_DURATION: Duration = Duration::from_millis(1500);
 
 #[derive(Debug, Clone, Copy)]
 struct PendingFeedback {
     session: u64,
     deadline: Instant,
+    end_session: bool,
 }
 
 impl PendingFeedback {
-    fn new(session: u64, duration: Duration) -> Self {
+    fn new(session: u64, duration: Duration, end_session: bool) -> Self {
         Self {
             session,
             deadline: Instant::now() + duration,
+            end_session,
         }
     }
 
@@ -246,6 +249,28 @@ fn feedback_wait_duration(feedback: Option<PendingFeedback>, now: Instant) -> Du
         .unwrap_or(EVENT_POLL_INTERVAL)
 }
 
+fn feedback_phase(kind: FeedbackKind) -> UiPhase {
+    match kind {
+        FeedbackKind::Info => UiPhase::Info,
+        FeedbackKind::Warning => UiPhase::Warning,
+        FeedbackKind::Error => UiPhase::Error,
+    }
+}
+
+fn smart_mode_available(ai_enabled: bool, model_available: bool, server_available: bool) -> bool {
+    ai_enabled && model_available && server_available
+}
+
+fn smart_unavailable_message(ai_enabled: bool, model_available: bool) -> &'static str {
+    if !ai_enabled {
+        "Smart Mode indisponível — AI desativada"
+    } else if !model_available {
+        "Smart Mode indisponível — modelo Qwen ausente"
+    } else {
+        "Smart Mode indisponível — llama-server ausente"
+    }
+}
+
 fn should_retry_engine_reload(event_session: u64, current_session: u64, has_engine: bool) -> bool {
     event_session != current_session && has_engine
 }
@@ -306,8 +331,13 @@ impl Daemon {
             return;
         }
         self.feedback = None;
-        if feedback.session == self.session {
+        if feedback.session != self.session {
+            return;
+        }
+        if feedback.end_session {
             self.cancel_session();
+        } else {
+            self.clear_ui_feedback();
         }
     }
 
@@ -351,6 +381,9 @@ impl Daemon {
     }
 
     fn handle_cmd(&mut self, cmd: Cmd) -> Response {
+        if !matches!(cmd, Cmd::Status) {
+            self.clear_inline_feedback();
+        }
         if self.feedback.is_some() && matches!(cmd, Cmd::Cancel) {
             self.cancel_session();
         } else {
@@ -394,22 +427,52 @@ impl Daemon {
             eprintln!("whisper: evento do OSD descartado (sessão antiga)");
             return;
         }
+        if matches!(
+            self.feedback,
+            Some(PendingFeedback {
+                end_session: true,
+                ..
+            })
+        ) && !matches!(ev, OsdEvent::Cancel | OsdEvent::Closed)
+        {
+            return;
+        }
         match ev {
-            OsdEvent::PauseToggle => match self.phase {
-                Phase::Recording => self.set_phase(Phase::Paused, None),
-                Phase::Paused => self.set_phase(Phase::Recording, None),
-                _ => {}
-            },
-            OsdEvent::Commit => self.commit(),
+            OsdEvent::PauseToggle => {
+                self.clear_temporary_feedback();
+                match self.phase {
+                    Phase::Recording => self.set_phase(Phase::Paused, None),
+                    Phase::Paused => self.set_phase(Phase::Recording, None),
+                    _ => {}
+                }
+            }
+            OsdEvent::Commit => {
+                self.clear_temporary_feedback();
+                self.commit();
+            }
             OsdEvent::Cancel => self.cancel_session(),
             OsdEvent::SmartToggle => {
-                if self.cfg.ai.enabled {
+                let server_available = self.cfg.ai.enabled && llm::Llm::server_available();
+                if smart_mode_available(
+                    self.cfg.ai.enabled,
+                    self.cfg.ai_model_path().is_some(),
+                    server_available,
+                ) {
+                    self.clear_temporary_feedback();
                     self.smart_mode = !self.smart_mode;
                     if let Ok(mut ui) = self.ui.lock() {
                         ui.smart = self.smart_mode;
                     }
                 } else {
-                    eprintln!("whisper: modo smart ignorado: [ai] enabled = false");
+                    self.show_inline_feedback(
+                        FeedbackKind::Warning,
+                        smart_unavailable_message(
+                            self.cfg.ai.enabled,
+                            self.cfg.ai_model_path().is_some(),
+                        )
+                        .to_string(),
+                        SMART_FEEDBACK_DURATION,
+                    );
                 }
             }
             OsdEvent::Closed => {
@@ -453,7 +516,7 @@ impl Daemon {
             } else {
                 format!("áudio indisponível: {detail}")
             };
-            self.show_feedback(msg, AUDIO_FEEDBACK_DURATION);
+            self.show_feedback(FeedbackKind::Error, msg, AUDIO_FEEDBACK_DURATION);
         }
     }
 
@@ -480,7 +543,7 @@ impl Daemon {
                 self.close_osd();
             }
             WorkerOutcome::Failed { msg, .. } => {
-                self.show_feedback(msg, PROCESSING_FEEDBACK_DURATION);
+                self.show_feedback(FeedbackKind::Error, msg, PROCESSING_FEEDBACK_DURATION);
             }
         }
     }
@@ -517,6 +580,7 @@ impl Daemon {
             Err(err) => {
                 if self.phase == Phase::Loading {
                     self.show_feedback(
+                        FeedbackKind::Error,
                         format!("modelo indisponível: {err}"),
                         PROCESSING_FEEDBACK_DURATION,
                     );
@@ -529,7 +593,7 @@ impl Daemon {
 
     fn start_session(&mut self) {
         self.close_osd();
-        self.feedback = None;
+        self.clear_temporary_feedback();
         self.pending_insert = None;
         self.session = self.session.wrapping_add(1);
         self.smart_mode = false;
@@ -610,7 +674,11 @@ impl Daemon {
                 });
             }
             Err(e) => {
-                self.show_feedback(format!("áudio: {e:#}"), AUDIO_FEEDBACK_DURATION);
+                self.show_feedback(
+                    FeedbackKind::Error,
+                    format!("áudio: {e:#}"),
+                    AUDIO_FEEDBACK_DURATION,
+                );
             }
         }
     }
@@ -627,9 +695,11 @@ impl Daemon {
         let engine = match &self.engine {
             Some(e) => Arc::clone(e),
             None => {
-                self.finish_session(Some(
+                self.show_feedback(
+                    FeedbackKind::Error,
                     "modelo não carregado: rode 'whisper setup'".to_string(),
-                ));
+                    PROCESSING_FEEDBACK_DURATION,
+                );
                 return;
             }
         };
@@ -666,6 +736,36 @@ impl Daemon {
         }
     }
 
+    fn set_ui_feedback(&mut self, kind: FeedbackKind, message: String) {
+        if let Ok(mut ui) = self.ui.lock() {
+            ui.feedback = Some(Feedback { kind, message });
+            ui.status = None;
+        }
+    }
+
+    fn clear_ui_feedback(&mut self) {
+        if let Ok(mut ui) = self.ui.lock() {
+            ui.feedback = None;
+        }
+    }
+
+    fn clear_temporary_feedback(&mut self) {
+        self.feedback = None;
+        self.clear_ui_feedback();
+    }
+
+    fn clear_inline_feedback(&mut self) {
+        if matches!(
+            self.feedback,
+            Some(PendingFeedback {
+                end_session: false,
+                ..
+            })
+        ) {
+            self.clear_temporary_feedback();
+        }
+    }
+
     /// Atualiza o aviso do rodapé do OSD conforme as dependências disponíveis.
     fn refresh_warning(&mut self) {
         let wtype_missing = matches!(self.cfg.insert_mode, InsertMode::Type | InsertMode::Both)
@@ -675,8 +775,13 @@ impl Daemon {
             .as_ref()
             .map(|e| !e.vad_available())
             .unwrap_or(false);
+        let server_available = self.cfg.ai.enabled && llm::Llm::server_available();
         let ai_missing = self.cfg.ai.enabled
-            && (self.cfg.ai_model_path().is_none() || !llm::Llm::server_available());
+            && !smart_mode_available(
+                self.cfg.ai.enabled,
+                self.cfg.ai_model_path().is_some(),
+                server_available,
+            );
         if let Ok(mut ui) = self.ui.lock() {
             ui.warning = compose_warning(wtype_missing, vad_missing, ai_missing);
         }
@@ -700,21 +805,27 @@ impl Daemon {
         self.stop_capture();
         self.close_osd();
         self.pending_insert = None;
-        self.feedback = None;
+        self.clear_temporary_feedback();
         self.phase = Phase::Idle;
     }
 
-    fn show_feedback(&mut self, msg: String, duration: Duration) {
+    fn show_inline_feedback(&mut self, kind: FeedbackKind, message: String, duration: Duration) {
+        self.set_ui_feedback(kind, message);
+        self.feedback = Some(PendingFeedback::new(self.session, duration, false));
+    }
+
+    fn show_feedback(&mut self, kind: FeedbackKind, msg: String, duration: Duration) {
         self.stop_capture();
         self.pending_insert = None;
         self.phase = Phase::Idle;
-        self.set_ui(UiPhase::Error, Some(msg));
-        self.feedback = Some(PendingFeedback::new(self.session, duration));
+        self.set_ui(feedback_phase(kind), None);
+        self.set_ui_feedback(kind, msg);
+        self.feedback = Some(PendingFeedback::new(self.session, duration, true));
     }
 
     fn finish_session(&mut self, msg: Option<String>) {
         if let Some(msg) = msg {
-            self.show_feedback(msg, EMPTY_FEEDBACK_DURATION);
+            self.show_feedback(FeedbackKind::Info, msg, EMPTY_FEEDBACK_DURATION);
         } else {
             self.cancel_session();
         }
@@ -864,6 +975,7 @@ mod tests {
         let feedback = PendingFeedback {
             session: 1,
             deadline: now + Duration::from_secs(1),
+            end_session: true,
         };
 
         assert!(!feedback.is_expired(now));
@@ -875,6 +987,7 @@ mod tests {
         let feedback = PendingFeedback {
             session: 1,
             deadline: now + Duration::from_secs(1),
+            end_session: true,
         };
 
         assert!(feedback.is_expired(now + Duration::from_secs(1)));
@@ -885,6 +998,37 @@ mod tests {
         assert_eq!(
             feedback_wait_duration(None, Instant::now()),
             EVENT_POLL_INTERVAL
+        );
+    }
+
+    #[test]
+    fn feedback_kinds_map_to_distinct_ui_phases() {
+        assert_eq!(feedback_phase(FeedbackKind::Info), UiPhase::Info);
+        assert_eq!(feedback_phase(FeedbackKind::Warning), UiPhase::Warning);
+        assert_eq!(feedback_phase(FeedbackKind::Error), UiPhase::Error);
+    }
+
+    #[test]
+    fn smart_mode_requires_enabled_ai_model_and_server() {
+        assert!(smart_mode_available(true, true, true));
+        assert!(!smart_mode_available(false, true, true));
+        assert!(!smart_mode_available(true, false, true));
+        assert!(!smart_mode_available(true, true, false));
+    }
+
+    #[test]
+    fn smart_unavailability_explains_the_missing_dependency() {
+        assert_eq!(
+            smart_unavailable_message(false, true),
+            "Smart Mode indisponível — AI desativada"
+        );
+        assert_eq!(
+            smart_unavailable_message(true, false),
+            "Smart Mode indisponível — modelo Qwen ausente"
+        );
+        assert_eq!(
+            smart_unavailable_message(true, true),
+            "Smart Mode indisponível — llama-server ausente"
         );
     }
 
@@ -949,6 +1093,7 @@ mod tests {
         daemon.feedback = Some(PendingFeedback {
             session: 1,
             deadline: Instant::now() + Duration::from_secs(1),
+            end_session: true,
         });
 
         daemon.handle_cmd(Cmd::Cancel);
@@ -962,11 +1107,76 @@ mod tests {
         daemon.feedback = Some(PendingFeedback {
             session: 1,
             deadline: Instant::now() - Duration::from_secs(1),
+            end_session: true,
         });
 
         daemon.expire_feedback_if_due();
 
         assert_eq!(daemon.phase, Phase::Idle);
+    }
+
+    #[test]
+    fn inline_feedback_expires_without_ending_recording() {
+        let mut daemon = test_daemon(1, Phase::Recording);
+        daemon.show_inline_feedback(
+            FeedbackKind::Warning,
+            "Smart Mode indisponível".to_string(),
+            Duration::from_secs(1),
+        );
+        daemon.feedback.as_mut().unwrap().deadline = Instant::now() - Duration::from_secs(1);
+
+        daemon.expire_feedback_if_due();
+
+        assert_eq!(daemon.phase, Phase::Recording);
+        assert!(daemon.feedback.is_none());
+        assert!(daemon.ui.lock().unwrap().feedback.is_none());
+    }
+
+    #[test]
+    fn terminal_feedback_keeps_ignoring_non_cancel_osd_controls() {
+        let mut daemon = test_daemon(1, Phase::Idle);
+        daemon.show_feedback(
+            FeedbackKind::Info,
+            "nada detectado".to_string(),
+            Duration::from_secs(1),
+        );
+
+        daemon.handle_osd(1, OsdEvent::PauseToggle);
+        daemon.handle_osd(1, OsdEvent::Commit);
+        daemon.handle_osd(1, OsdEvent::SmartToggle);
+
+        assert!(matches!(
+            daemon.feedback,
+            Some(PendingFeedback {
+                end_session: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn empty_result_uses_informational_feedback() {
+        let mut daemon = test_daemon(1, Phase::Transcribing);
+
+        daemon.finish_session(Some("nada detectado".to_string()));
+
+        assert_eq!(daemon.phase, Phase::Idle);
+        let ui = daemon.ui.lock().unwrap();
+        assert_eq!(ui.phase, UiPhase::Info);
+        assert_eq!(ui.feedback.as_ref().unwrap().kind, FeedbackKind::Info);
+    }
+
+    #[test]
+    fn real_failure_uses_error_feedback() {
+        let mut daemon = test_daemon(1, Phase::Recording);
+
+        daemon.show_feedback(
+            FeedbackKind::Error,
+            "transcrição falhou".to_string(),
+            Duration::from_secs(1),
+        );
+
+        assert_eq!(daemon.ui.lock().unwrap().phase, UiPhase::Error);
     }
 
     #[test]

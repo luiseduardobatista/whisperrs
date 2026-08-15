@@ -93,7 +93,7 @@ Sessão de ditado:
 | `Space` | pausar/retomar a gravação |
 | `Enter` | concluir: transcreve, insere na app focada e fecha |
 | `Esc` | cancelar e descartar |
-| `S` | alternar o modo smart do Qwen (se habilitado) |
+| `S` | alternar o modo Smart quando Qwen estiver disponível |
 
 O `toggle` durante `Loading` ou `Transcribing` não altera a sessão; use
 `cancel` ou `Esc` para descartar explicitamente. Integrações (Niri, systemd) e

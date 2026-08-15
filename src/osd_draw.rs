@@ -3,7 +3,7 @@
 use ab_glyph::{Font as _, FontArc, PxScale, ScaleFont as _};
 use tiny_skia::{FillRule, Paint, PathBuilder, PixmapMut, Rect, Stroke, Transform};
 
-use crate::osd::{Phase, UiState};
+use crate::osd::{FeedbackKind, Phase, UiState};
 
 /// Dimensões lógicas do cartão (escaladas pela saída na renderização).
 pub(crate) const CARD_W: f32 = 460.0;
@@ -12,6 +12,7 @@ pub(crate) const CARD_H: f32 = 148.0;
 const GREEN: (u8, u8, u8) = (46, 204, 113);
 const BLUE: (u8, u8, u8) = (52, 152, 219);
 const RED: (u8, u8, u8) = (235, 103, 103);
+const AMBER: (u8, u8, u8) = (218, 171, 86);
 const CARD_RADIUS: f32 = 13.0;
 const KEYCAP_TEXT_SIZE: f32 = 10.5;
 const ACTION_TEXT_SIZE: f32 = 11.0;
@@ -135,6 +136,8 @@ fn phase_label(phase: Phase) -> &'static str {
         Phase::Transcribing => "transcrevendo",
         Phase::Loading => "carregando",
         Phase::Cleaning => "transcrevendo",
+        Phase::Info => "informativo",
+        Phase::Warning => "aviso",
         Phase::Error => "erro",
     }
 }
@@ -142,8 +145,11 @@ fn phase_label(phase: Phase) -> &'static str {
 fn phase_color(phase: Phase) -> (u8, u8, u8) {
     match phase {
         Phase::Recording => GREEN,
+        Phase::Warning => AMBER,
         Phase::Error => RED,
-        Phase::Paused | Phase::Transcribing | Phase::Loading | Phase::Cleaning => BLUE,
+        Phase::Paused | Phase::Transcribing | Phase::Loading | Phase::Cleaning | Phase::Info => {
+            BLUE
+        }
     }
 }
 
@@ -206,7 +212,9 @@ pub(crate) fn draw_card(
         Phase::Transcribing | Phase::Loading | Phase::Cleaning => {
             draw_processing_indicator(pix, accent, layout.x, layout.y, layout.w, animation_time, t);
         }
-        Phase::Error => draw_error_indicator(pix, accent, layout.x, layout.y, layout.w, t),
+        Phase::Info | Phase::Warning | Phase::Error => {
+            draw_feedback_indicator(pix, accent, layout.x, layout.y, layout.w, t);
+        }
     }
     draw_center_status(pix, font, ui, layout.x, layout.y, layout.w, t);
     draw_footer(pix, font, ui, layout.x, layout.y, layout.w, t);
@@ -334,7 +342,7 @@ fn draw_status_indicator(
                 t,
             );
         }
-        Phase::Error => {
+        Phase::Info | Phase::Warning | Phase::Error => {
             fill_circle(pix, x, y, 7.0, (color.0, color.1, color.2, 210), t);
             fill_circle(pix, x, y, 4.8, (16, 20, 25, 255), t);
             fill_circle(pix, x, y, 1.8, (color.0, color.1, color.2, 255), t);
@@ -418,7 +426,7 @@ fn draw_processing_indicator(
     }
 }
 
-fn draw_error_indicator(
+fn draw_feedback_indicator(
     pix: &mut PixmapMut<'_>,
     accent: (u8, u8, u8),
     card_x: f32,
@@ -428,6 +436,14 @@ fn draw_error_indicator(
 ) {
     let line = Rect::from_xywh(card_x + w / 2.0 - 28.0, card_y + 71.0, 56.0, 2.0).unwrap();
     fill_rounded_rect(pix, line, 1.0, (accent.0, accent.1, accent.2, 110), t);
+}
+
+fn feedback_color(kind: FeedbackKind) -> (u8, u8, u8) {
+    match kind {
+        FeedbackKind::Info => BLUE,
+        FeedbackKind::Warning => AMBER,
+        FeedbackKind::Error => RED,
+    }
 }
 
 fn draw_center_status(
@@ -443,14 +459,18 @@ fn draw_center_status(
     let Some(status) = center_status(ui, label) else {
         return;
     };
-    let size = 14.0;
+    let (size, color) = if let Some(feedback) = ui.feedback.as_ref() {
+        let color = feedback_color(feedback.kind);
+        (14.0, (color.0, color.1, color.2, 255))
+    } else if matches!(ui.phase, Phase::Recording | Phase::Paused) && ui.warning.is_some() {
+        (11.0, (AMBER.0, AMBER.1, AMBER.2, 255))
+    } else if ui.phase == Phase::Error {
+        (14.0, (RED.0, RED.1, RED.2, 255))
+    } else {
+        (14.0, (164, 173, 185, 255))
+    };
     let max_w = w - 48.0;
     let status_w = measure(font, status, size).min(max_w);
-    let color = if ui.phase == Phase::Error {
-        (RED.0, RED.1, RED.2, 255)
-    } else {
-        (164, 173, 185, 255)
-    };
     draw_text(
         pix,
         font,
@@ -465,18 +485,23 @@ fn draw_center_status(
 }
 
 fn center_status<'a>(ui: &'a UiState, label: &str) -> Option<&'a str> {
+    if let Some(feedback) = ui.feedback.as_ref() {
+        return Some(feedback.message.as_str());
+    }
     match ui.phase {
-        Phase::Recording | Phase::Paused => None,
+        Phase::Recording | Phase::Paused => ui.warning.as_deref(),
         Phase::Transcribing | Phase::Cleaning => match ui.status.as_deref() {
             Some(status) if !status.trim().eq_ignore_ascii_case(label) => Some(status),
             _ => Some("Processando…"),
         },
         Phase::Loading => Some(ui.status.as_deref().unwrap_or("Carregando…")),
-        Phase::Error => Some(ui.status.as_deref().unwrap_or("Erro")),
+        Phase::Info | Phase::Warning | Phase::Error => {
+            Some(ui.status.as_deref().unwrap_or("Feedback temporário"))
+        }
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct FooterAction {
     key: &'static str,
     label: &'static str,
@@ -495,6 +520,10 @@ const RECORDING_ACTIONS: &[FooterAction] = &[
         key: "Esc",
         label: "cancelar",
     },
+    FooterAction {
+        key: "S",
+        label: "Smart",
+    },
 ];
 const PAUSED_ACTIONS: &[FooterAction] = &[
     FooterAction {
@@ -509,13 +538,22 @@ const PAUSED_ACTIONS: &[FooterAction] = &[
         key: "Esc",
         label: "cancelar",
     },
+    FooterAction {
+        key: "S",
+        label: "Smart",
+    },
 ];
 
 fn footer_actions(phase: Phase) -> Option<&'static [FooterAction]> {
     match phase {
         Phase::Recording => Some(RECORDING_ACTIONS),
         Phase::Paused => Some(PAUSED_ACTIONS),
-        Phase::Transcribing | Phase::Loading | Phase::Cleaning | Phase::Error => None,
+        Phase::Transcribing
+        | Phase::Loading
+        | Phase::Cleaning
+        | Phase::Info
+        | Phase::Warning
+        | Phase::Error => None,
     }
 }
 
@@ -535,23 +573,6 @@ fn draw_footer(
         (255, 255, 255, 10),
         t,
     );
-
-    if let Some(warning) = ui.warning.as_deref() {
-        let max_w = w - 36.0;
-        let text_w = measure(font, warning, 11.0).min(max_w);
-        draw_text(
-            pix,
-            font,
-            warning,
-            card_x + (w - text_w) / 2.0,
-            card_y + 133.0,
-            11.0,
-            (218, 171, 86, 255),
-            max_w,
-            t,
-        );
-        return;
-    }
 
     let Some(actions) = footer_actions(ui.phase) else {
         return;
@@ -735,11 +756,11 @@ mod tests {
     }
 
     #[test]
-    fn phase_colors_keep_recording_processing_and_error_distinct() {
+    fn phase_colors_keep_feedback_levels_distinct() {
         assert_eq!(phase_color(Phase::Recording), GREEN);
+        assert_eq!(phase_color(Phase::Info), BLUE);
+        assert_eq!(phase_color(Phase::Warning), AMBER);
         assert_eq!(phase_color(Phase::Error), RED);
-        assert_eq!(phase_color(Phase::Transcribing), BLUE);
-        assert_eq!(phase_color(Phase::Paused), BLUE);
     }
 
     #[test]
@@ -750,6 +771,8 @@ mod tests {
             Phase::Transcribing,
             Phase::Loading,
             Phase::Cleaning,
+            Phase::Info,
+            Phase::Warning,
             Phase::Error,
         ] {
             let mut pix = Pixmap::new(800, CARD_H as u32).unwrap();
@@ -797,12 +820,26 @@ mod tests {
     }
 
     #[test]
-    fn processing_states_do_not_show_recording_actions() {
-        assert!(footer_actions(Phase::Recording).is_some());
-        assert!(footer_actions(Phase::Paused).is_some());
+    fn recording_actions_include_smart_mode() {
+        let actions = footer_actions(Phase::Recording).unwrap();
+        assert_eq!(actions.last().unwrap().label, "Smart");
+    }
+
+    #[test]
+    fn paused_actions_keep_resume_and_smart_mode() {
+        let actions = footer_actions(Phase::Paused).unwrap();
+        assert_eq!(actions[0].label, "retomar");
+        assert_eq!(actions.last().unwrap().label, "Smart");
+    }
+
+    #[test]
+    fn processing_and_feedback_states_do_not_show_recording_actions() {
         assert!(footer_actions(Phase::Transcribing).is_none());
         assert!(footer_actions(Phase::Loading).is_none());
         assert!(footer_actions(Phase::Cleaning).is_none());
+        assert!(footer_actions(Phase::Info).is_none());
+        assert!(footer_actions(Phase::Warning).is_none());
+        assert!(footer_actions(Phase::Error).is_none());
     }
 
     #[test]
@@ -818,6 +855,32 @@ mod tests {
         let mut ui = UiState::new("pt · turbo".to_string());
         ui.phase = Phase::Recording;
         assert_eq!(center_status(&ui, "gravando"), None);
+    }
+
+    #[test]
+    fn recording_shows_persistent_warning_without_hiding_actions() {
+        let mut ui = UiState::new("pt · turbo".to_string());
+        ui.phase = Phase::Recording;
+        ui.warning = Some("Qwen ausente".to_string());
+
+        assert_eq!(center_status(&ui, "gravando"), Some("Qwen ausente"));
+        assert!(footer_actions(ui.phase).is_some());
+    }
+
+    #[test]
+    fn inline_feedback_overrides_persistent_warning() {
+        let mut ui = UiState::new("pt · turbo".to_string());
+        ui.phase = Phase::Recording;
+        ui.warning = Some("Qwen ausente".to_string());
+        ui.feedback = Some(crate::osd::Feedback {
+            kind: FeedbackKind::Warning,
+            message: "Smart Mode indisponível".to_string(),
+        });
+
+        assert_eq!(
+            center_status(&ui, "gravando"),
+            Some("Smart Mode indisponível")
+        );
     }
 
     #[test]
@@ -844,8 +907,8 @@ mod tests {
         ];
         for warning in warnings {
             assert!(
-                measure(f, warning, 11.0) <= CARD_W - 36.0,
-                "aviso não cabe no rodapé: {warning}"
+                measure(f, warning, 11.0) <= CARD_W - 48.0,
+                "aviso não cabe no centro: {warning}"
             );
         }
     }
