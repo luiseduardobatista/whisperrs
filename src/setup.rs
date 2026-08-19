@@ -336,9 +336,9 @@ fn print_summary(plan: &SetupPlan) {
     );
     println!("  Inserção     {}", plan.cfg.insert_mode.label());
     if plan.cfg.ai.enabled {
-        println!("  Smart / Qwen Ativado ({})", plan.cfg.ai.model);
+        println!("  Qwen cleanup Ativado ({})", plan.cfg.ai.model);
     } else {
-        println!("  Smart / Qwen Desativado");
+        println!("  Qwen cleanup Desativado");
     }
 
     if plan.pending.is_empty() {
@@ -412,7 +412,7 @@ fn print_completion(plan: &SetupPlan, report: &DownloadReport) {
     println!("VAD em       {}", plan.vad_dest.display());
     println!("Inserção     {}", plan.cfg.insert_mode.label());
     println!(
-        "Smart / Qwen {}",
+        "Qwen cleanup {}",
         if plan.cfg.ai.enabled {
             format!("ativado ({})", plan.cfg.ai.model)
         } else {

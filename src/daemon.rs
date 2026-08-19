@@ -81,21 +81,18 @@ const EVENT_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const AUDIO_FEEDBACK_DURATION: Duration = Duration::from_secs(2);
 const PROCESSING_FEEDBACK_DURATION: Duration = Duration::from_millis(2500);
 const EMPTY_FEEDBACK_DURATION: Duration = Duration::from_millis(1200);
-const SMART_FEEDBACK_DURATION: Duration = Duration::from_millis(1500);
 
 #[derive(Debug, Clone, Copy)]
 struct PendingFeedback {
     session: u64,
     deadline: Instant,
-    end_session: bool,
 }
 
 impl PendingFeedback {
-    fn new(session: u64, duration: Duration, end_session: bool) -> Self {
+    fn new(session: u64, duration: Duration) -> Self {
         Self {
             session,
             deadline: Instant::now() + duration,
-            end_session,
         }
     }
 
@@ -170,7 +167,6 @@ struct Daemon {
     /// (o OSD visível segura o foco de teclado; wtype digitaria nele).
     pending_insert: Option<String>,
     llm: Arc<llm::Llm>,
-    smart_mode: bool,
     /// Contador de sessões: descarta eventos assíncronos de sessões antigas.
     session: u64,
     feedback: Option<PendingFeedback>,
@@ -204,7 +200,6 @@ pub fn run() -> Result<()> {
         osd: None,
         pending_insert: None,
         llm: Arc::new(llm::Llm::default()),
-        smart_mode: false,
         session: 0,
         feedback: None,
         events_rx,
@@ -229,8 +224,15 @@ fn warn_if_wtype_missing(cfg: &Config) {
     }
 }
 
+fn qwen_cleanup_available(cfg: &Config) -> bool {
+    cfg.ai.enabled
+        && cfg.ai.cleanup
+        && cfg.ai_model_path().is_some()
+        && llm::Llm::server_available()
+}
+
 fn warn_if_ai_missing(cfg: &Config) {
-    if cfg.ai.enabled && (cfg.ai_model_path().is_none() || !llm::Llm::server_available()) {
+    if cfg.ai.enabled && cfg.ai.cleanup && !qwen_cleanup_available(cfg) {
         eprintln!(
             "whisper: aviso: Qwen indisponível — cleanup em Rust. {}",
             llm::Llm::hint()
@@ -251,22 +253,7 @@ fn feedback_wait_duration(feedback: Option<PendingFeedback>, now: Instant) -> Du
 fn feedback_phase(kind: FeedbackKind) -> UiPhase {
     match kind {
         FeedbackKind::Info => UiPhase::Info,
-        FeedbackKind::Warning => UiPhase::Warning,
         FeedbackKind::Error => UiPhase::Error,
-    }
-}
-
-fn smart_mode_available(ai_enabled: bool, model_available: bool, server_available: bool) -> bool {
-    ai_enabled && model_available && server_available
-}
-
-fn smart_unavailable_message(ai_enabled: bool, model_available: bool) -> &'static str {
-    if !ai_enabled {
-        "Smart Mode indisponível — AI desativada"
-    } else if !model_available {
-        "Smart Mode indisponível — modelo Qwen ausente"
-    } else {
-        "Smart Mode indisponível — llama-server ausente"
     }
 }
 
@@ -292,7 +279,6 @@ impl Daemon {
                                 exe: None,
                                 language: None,
                                 model: None,
-                                smart: None,
                             });
                             break;
                         }
@@ -336,11 +322,7 @@ impl Daemon {
         if feedback.session != self.session {
             return;
         }
-        if feedback.end_session {
-            self.cancel_session();
-        } else {
-            self.clear_ui_feedback();
-        }
+        self.cancel_session();
     }
 
     /// Hot reload: se o arquivo de config mudou, troca a config na hora.
@@ -383,9 +365,6 @@ impl Daemon {
     }
 
     fn handle_cmd(&mut self, cmd: Cmd) -> Response {
-        if !matches!(cmd, Cmd::Status) {
-            self.clear_inline_feedback();
-        }
         if self.feedback.is_some() && matches!(cmd, Cmd::Cancel) {
             self.cancel_session();
         } else {
@@ -404,7 +383,6 @@ impl Daemon {
             exe: None,
             language: None,
             model: None,
-            smart: None,
         };
         if matches!(cmd, Cmd::Status) {
             // O CLI compara com o próprio binário: daemon de outra origem
@@ -415,7 +393,6 @@ impl Daemon {
                 .map(|p| p.display().to_string());
             resp.language = Some(self.cfg.language.label().to_string());
             resp.model = Some(self.cfg.model.clone());
-            resp.smart = Some(self.smart_mode);
         }
         resp
     }
@@ -435,14 +412,7 @@ impl Daemon {
             eprintln!("whisper: evento do OSD descartado (sessão antiga)");
             return;
         }
-        if matches!(
-            self.feedback,
-            Some(PendingFeedback {
-                end_session: true,
-                ..
-            })
-        ) && !matches!(ev, OsdEvent::Cancel | OsdEvent::Closed)
-        {
+        if self.feedback.is_some() && !matches!(ev, OsdEvent::Cancel | OsdEvent::Closed) {
             return;
         }
         match ev {
@@ -459,30 +429,6 @@ impl Daemon {
                 self.commit();
             }
             OsdEvent::Cancel => self.cancel_session(),
-            OsdEvent::SmartToggle => {
-                let server_available = self.cfg.ai.enabled && llm::Llm::server_available();
-                if smart_mode_available(
-                    self.cfg.ai.enabled,
-                    self.cfg.ai_model_path().is_some(),
-                    server_available,
-                ) {
-                    self.clear_temporary_feedback();
-                    self.smart_mode = !self.smart_mode;
-                    if let Ok(mut ui) = self.ui.lock() {
-                        ui.smart = self.smart_mode;
-                    }
-                } else {
-                    self.show_inline_feedback(
-                        FeedbackKind::Warning,
-                        smart_unavailable_message(
-                            self.cfg.ai.enabled,
-                            self.cfg.ai_model_path().is_some(),
-                        )
-                        .to_string(),
-                        SMART_FEEDBACK_DURATION,
-                    );
-                }
-            }
             OsdEvent::Closed => {
                 if let Some(text) = self.pending_insert.take() {
                     // OSD fechado: o foco voltou à app, agora digita.
@@ -605,7 +551,6 @@ impl Daemon {
         self.clear_temporary_feedback();
         self.pending_insert = None;
         self.session = self.session.wrapping_add(1);
-        self.smart_mode = false;
         let ui = UiState::new(lang_model(&self.cfg));
         self.ui = Arc::new(Mutex::new(ui));
         // Avisos no rodapé do cartão (wtype/VAD ausentes): o usuário vê antes
@@ -715,12 +660,11 @@ impl Daemon {
         self.set_phase(Phase::Transcribing, Some("Transcrevendo".to_string()));
         let samples = std::mem::take(&mut self.buffer);
         let cfg = self.cfg.clone();
-        let smart = self.smart_mode;
         let session = self.session;
         let llm = Arc::clone(&self.llm);
         let tx = self.events_tx.clone();
         std::thread::spawn(move || {
-            let out = transcribe_worker(&engine, samples, &cfg, smart, session, llm, tx.clone());
+            let out = transcribe_worker(&engine, samples, &cfg, session, llm, tx.clone());
             let _ = tx.send(DaemonEvent::Worker(out));
         });
     }
@@ -763,18 +707,6 @@ impl Daemon {
         self.clear_ui_feedback();
     }
 
-    fn clear_inline_feedback(&mut self) {
-        if matches!(
-            self.feedback,
-            Some(PendingFeedback {
-                end_session: false,
-                ..
-            })
-        ) {
-            self.clear_temporary_feedback();
-        }
-    }
-
     /// Atualiza o aviso do rodapé do OSD conforme as dependências disponíveis.
     fn refresh_warning(&mut self) {
         let wtype_missing = self.cfg.insert_mode.uses_wtype() && !insert::wtype_available();
@@ -783,13 +715,8 @@ impl Daemon {
             .as_ref()
             .map(|e| !e.vad_available())
             .unwrap_or(false);
-        let server_available = self.cfg.ai.enabled && llm::Llm::server_available();
-        let ai_missing = self.cfg.ai.enabled
-            && !smart_mode_available(
-                self.cfg.ai.enabled,
-                self.cfg.ai_model_path().is_some(),
-                server_available,
-            );
+        let ai_missing =
+            self.cfg.ai.enabled && self.cfg.ai.cleanup && !qwen_cleanup_available(&self.cfg);
         if let Ok(mut ui) = self.ui.lock() {
             ui.warning = compose_warning(wtype_missing, vad_missing, ai_missing);
         }
@@ -817,18 +744,13 @@ impl Daemon {
         self.phase = Phase::Idle;
     }
 
-    fn show_inline_feedback(&mut self, kind: FeedbackKind, message: String, duration: Duration) {
-        self.set_ui_feedback(kind, message);
-        self.feedback = Some(PendingFeedback::new(self.session, duration, false));
-    }
-
     fn show_feedback(&mut self, kind: FeedbackKind, msg: String, duration: Duration) {
         self.stop_capture();
         self.pending_insert = None;
         self.phase = Phase::Idle;
         self.set_ui(feedback_phase(kind), None);
         self.set_ui_feedback(kind, msg);
-        self.feedback = Some(PendingFeedback::new(self.session, duration, true));
+        self.feedback = Some(PendingFeedback::new(self.session, duration));
     }
 
     fn finish_session(&mut self, msg: Option<String>) {
@@ -844,7 +766,6 @@ fn transcribe_worker(
     engine: &Engine,
     samples: Vec<f32>,
     cfg: &Config,
-    smart: bool,
     session: u64,
     llm: Arc<llm::Llm>,
     progress_tx: Sender<DaemonEvent>,
@@ -874,14 +795,14 @@ fn transcribe_worker(
         }
     };
     let fallback = rust_cleanup(&raw, cfg);
-    let text = if use_ai(cfg, smart) {
+    let text = if use_ai(cfg) {
         let _ = progress_tx.send(DaemonEvent::WorkerProgress {
             session,
             phase: UiPhase::Cleaning,
             status: "Transcrevendo".to_string(),
         });
-        match llm_process(cfg, smart, &raw, llm) {
-            Ok(text) if plausible_no_think_ok(&raw, &text, smart) => text,
+        match llm_process(cfg, &raw, llm) {
+            Ok(text) if llm::plausible(&raw, &text) => text,
             Ok(_) => {
                 eprintln!("whisper: resposta do Qwen rejeitada — usando fallback");
                 fallback
@@ -910,20 +831,12 @@ fn rust_cleanup(text: &str, cfg: &Config) -> String {
     text
 }
 
-fn use_ai(cfg: &Config, smart: bool) -> bool {
-    cfg.ai.enabled && (smart || cfg.ai.cleanup) && cfg.ai_model_path().is_some()
+fn use_ai(cfg: &Config) -> bool {
+    cfg.ai.enabled && cfg.ai.cleanup && cfg.ai_model_path().is_some()
 }
 
-fn llm_process(cfg: &Config, smart: bool, raw: &str, llm: Arc<llm::Llm>) -> anyhow::Result<String> {
-    llm.process(&cfg.ai, cfg.threads, raw, smart)
-}
-
-fn plausible_no_think_ok(raw: &str, out: &str, smart: bool) -> bool {
-    if smart {
-        llm::basic_ok(out, raw)
-    } else {
-        llm::plausible(raw, out)
-    }
+fn llm_process(cfg: &Config, raw: &str, llm: Arc<llm::Llm>) -> anyhow::Result<String> {
+    llm.process(&cfg.ai, cfg.threads, raw)
 }
 
 /// Sobe o engine em background (primeira sessão ou hot reload da config).
@@ -983,7 +896,6 @@ mod tests {
         let feedback = PendingFeedback {
             session: 1,
             deadline: now + Duration::from_secs(1),
-            end_session: true,
         };
 
         assert!(!feedback.is_expired(now));
@@ -995,7 +907,6 @@ mod tests {
         let feedback = PendingFeedback {
             session: 1,
             deadline: now + Duration::from_secs(1),
-            end_session: true,
         };
 
         assert!(feedback.is_expired(now + Duration::from_secs(1)));
@@ -1012,32 +923,7 @@ mod tests {
     #[test]
     fn feedback_kinds_map_to_distinct_ui_phases() {
         assert_eq!(feedback_phase(FeedbackKind::Info), UiPhase::Info);
-        assert_eq!(feedback_phase(FeedbackKind::Warning), UiPhase::Warning);
         assert_eq!(feedback_phase(FeedbackKind::Error), UiPhase::Error);
-    }
-
-    #[test]
-    fn smart_mode_requires_enabled_ai_model_and_server() {
-        assert!(smart_mode_available(true, true, true));
-        assert!(!smart_mode_available(false, true, true));
-        assert!(!smart_mode_available(true, false, true));
-        assert!(!smart_mode_available(true, true, false));
-    }
-
-    #[test]
-    fn smart_unavailability_explains_the_missing_dependency() {
-        assert_eq!(
-            smart_unavailable_message(false, true),
-            "Smart Mode indisponível — AI desativada"
-        );
-        assert_eq!(
-            smart_unavailable_message(true, false),
-            "Smart Mode indisponível — modelo Qwen ausente"
-        );
-        assert_eq!(
-            smart_unavailable_message(true, true),
-            "Smart Mode indisponível — llama-server ausente"
-        );
     }
 
     fn test_daemon(session: u64, phase: Phase) -> Daemon {
@@ -1054,7 +940,6 @@ mod tests {
             osd: None,
             pending_insert: None,
             llm: Arc::new(llm::Llm::default()),
-            smart_mode: false,
             session,
             feedback: None,
             events_rx,
@@ -1067,13 +952,11 @@ mod tests {
         let mut daemon = test_daemon(1, Phase::Recording);
         daemon.cfg.language = crate::config::Language::En;
         daemon.cfg.model = "small".to_string();
-        daemon.smart_mode = true;
 
         let response = daemon.handle_cmd(Cmd::Status);
 
         assert_eq!(response.language.as_deref(), Some("en"));
         assert_eq!(response.model.as_deref(), Some("small"));
-        assert_eq!(response.smart, Some(true));
     }
 
     #[test]
@@ -1084,7 +967,6 @@ mod tests {
 
         assert_eq!(response.language, None);
         assert_eq!(response.model, None);
-        assert_eq!(response.smart, None);
     }
 
     #[test]
@@ -1126,7 +1008,6 @@ mod tests {
         daemon.feedback = Some(PendingFeedback {
             session: 1,
             deadline: Instant::now() + Duration::from_secs(1),
-            end_session: true,
         });
 
         daemon.handle_cmd(Cmd::Cancel);
@@ -1140,29 +1021,11 @@ mod tests {
         daemon.feedback = Some(PendingFeedback {
             session: 1,
             deadline: Instant::now() - Duration::from_secs(1),
-            end_session: true,
         });
 
         daemon.expire_feedback_if_due();
 
         assert_eq!(daemon.phase, Phase::Idle);
-    }
-
-    #[test]
-    fn inline_feedback_expires_without_ending_recording() {
-        let mut daemon = test_daemon(1, Phase::Recording);
-        daemon.show_inline_feedback(
-            FeedbackKind::Warning,
-            "Smart Mode indisponível".to_string(),
-            Duration::from_secs(1),
-        );
-        daemon.feedback.as_mut().unwrap().deadline = Instant::now() - Duration::from_secs(1);
-
-        daemon.expire_feedback_if_due();
-
-        assert_eq!(daemon.phase, Phase::Recording);
-        assert!(daemon.feedback.is_none());
-        assert!(daemon.ui.lock().unwrap().feedback.is_none());
     }
 
     #[test]
@@ -1176,15 +1039,8 @@ mod tests {
 
         daemon.handle_osd(1, OsdEvent::PauseToggle);
         daemon.handle_osd(1, OsdEvent::Commit);
-        daemon.handle_osd(1, OsdEvent::SmartToggle);
 
-        assert!(matches!(
-            daemon.feedback,
-            Some(PendingFeedback {
-                end_session: true,
-                ..
-            })
-        ));
+        assert!(daemon.feedback.is_some());
     }
 
     #[test]
@@ -1310,7 +1166,7 @@ mod tests {
     }
 
     #[test]
-    fn use_ai_obeys_enabled_cleanup_smart_and_model_presence() {
+    fn use_ai_requires_enabled_cleanup_and_model() {
         let path = std::env::temp_dir().join(format!(
             "whisper-ai-use-{}-{}",
             std::process::id(),
@@ -1324,15 +1180,14 @@ mod tests {
         cfg.ai.enabled = true;
         cfg.ai.model = path.display().to_string();
         cfg.ai.cleanup = false;
-        assert!(!use_ai(&cfg, false));
-        assert!(use_ai(&cfg, true));
+        assert!(!use_ai(&cfg));
         cfg.ai.enabled = false;
-        assert!(!use_ai(&cfg, true));
+        assert!(!use_ai(&cfg));
         cfg.ai.enabled = true;
         cfg.ai.cleanup = true;
-        assert!(use_ai(&cfg, false));
+        assert!(use_ai(&cfg));
         std::fs::remove_file(&path).unwrap();
-        assert!(!use_ai(&cfg, true));
+        assert!(!use_ai(&cfg));
     }
 
     #[test]

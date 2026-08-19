@@ -46,12 +46,11 @@ O modo humano mostra o estado da sessão quando o daemon está disponível e
 objeto em stdout, sem texto humano, ANSI ou avisos:
 
 ```json
-{"daemon":"running","state":"recording","language":"pt","model":"small","smart":false,"exe":"/caminho/para/whisper"}
+{"daemon":"running","state":"recording","language":"pt","model":"small","exe":"/caminho/para/whisper"}
 ```
 
-Campos `language`, `model`, `smart` e `exe` são opcionais para compatibilidade
-com daemons antigos. `smart` representa somente o Smart Mode da sessão atual;
-`language` é o idioma configurado (`pt`, `en` ou `auto`) e `model` é o modelo
+Campos `language`, `model` e `exe` são opcionais para compatibilidade com
+daemons antigos. `language` é o idioma configurado (`pt`, `en` ou `auto`) e `model` é o modelo
 configurado, não uma garantia de que o engine já foi carregado. Se o daemon
 estiver parado, o JSON é `{"daemon":"stopped"}` e o exit code é `0`.
 
@@ -97,7 +96,6 @@ abre na borda inferior da tela com a waveform ao vivo:
 | `Space` | pausar/retomar a gravação |
 | `Enter` | concluir: transcreve, insere na app focada e fecha |
 | `Esc` | cancelar e descartar |
-| `S` | alternar o modo Smart quando Qwen estiver disponível |
 
 Fluxo interno de uma sessão:
 
@@ -116,8 +114,8 @@ Fluxo interno de uma sessão:
 6. `Esc`/`cancel` descarta explicitamente a sessão, inclusive durante o
    carregamento ou a transcrição. Mensagens temporárias de erro ou de ausência
    de fala permanecem no OSD pelo tempo planejado sem bloquear `status`,
-   `stop` ou novos comandos. Se o Smart Mode estiver indisponível, o aviso é
-   temporário e a gravação continua ativa.
+   `stop` ou novos comandos. Se o Qwen estiver indisponível, o fallback Rust
+   continua sendo usado.
 
 A língua é forçada no modelo (mais rápido e preciso que auto-detect); `auto`
 deixa o whisper decidir. Acentos vêm do próprio modelo.

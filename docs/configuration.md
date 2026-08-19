@@ -22,7 +22,7 @@ enabled = false                 # o setup ativa somente se Qwen for escolhido
 model = "qwen3.5-0.8b"           # nome do catálogo ou caminho com '/'
 context_size = 2048
 gpu = true
-cleanup = true                  # pós-processa também sem o modo smart
+cleanup = true                  # usa Qwen no cleanup normal quando disponível
 ```
 
 | Opção | Valores | Default | Efeito |
@@ -40,7 +40,7 @@ cleanup = true                  # pós-processa também sem o modo smart
 | `ai.model` | nome ou caminho | `qwen3.5-0.8b` | modelo GGUF; nomes usam o catálogo LLM |
 | `ai.context_size` | inteiro | `2048` | contexto passado ao `llama-server` |
 | `ai.gpu` | booleano | `true` | tenta carregar as camadas na GPU e cai para CPU se necessário |
-| `ai.cleanup` | booleano | `true` | usa Qwen no cleanup normal; o modo smart tenta Qwen sempre que habilitado |
+| `ai.cleanup` | booleano | `true` | usa Qwen no cleanup normal; desabilitado, usa somente o cleanup Rust |
 
 `insert_mode = "type"` continua aceito como alias legado de `"insert"`. Configurações
 existentes com `"both"` preservam o comportamento anterior; o novo padrão só se

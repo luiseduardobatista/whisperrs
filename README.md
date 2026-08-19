@@ -94,7 +94,7 @@ Para automação, `whisper status --json` escreve somente um objeto JSON em
 stdout. Um daemon parado é um resultado válido e retorna exit code `0`:
 
 ```json
-{"daemon":"running","state":"recording","language":"pt","model":"small","smart":false}
+{"daemon":"running","state":"recording","language":"pt","model":"small"}
 ```
 
 Falhas de transporte ou protocolo não escrevem JSON em stdout, informam o
@@ -107,7 +107,6 @@ Sessão de ditado:
 | `Space` | pausar/retomar a gravação |
 | `Enter` | concluir: transcreve, insere na app focada e fecha |
 | `Esc` | cancelar e descartar |
-| `S` | alternar o modo Smart quando Qwen estiver disponível |
 
 O `toggle` durante `Loading` ou `Transcribing` não altera a sessão; use
 `cancel` ou `Esc` para descartar explicitamente. Integrações (Niri, systemd) e

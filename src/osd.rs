@@ -51,14 +51,12 @@ pub enum Phase {
     Loading,
     Cleaning,
     Info,
-    Warning,
     Error,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeedbackKind {
     Info,
-    Warning,
     Error,
 }
 
@@ -74,10 +72,8 @@ pub struct UiState {
     pub status: Option<String>,
     /// Aviso persistente exibido no centro do cartão (ex.: wtype ausente).
     pub warning: Option<String>,
-    /// Feedback temporário que não necessariamente encerra a sessão.
+    /// Feedback temporário que encerra a sessão após o prazo.
     pub feedback: Option<Feedback>,
-    /// Indica que o próximo ditado pode conter uma instrução de transformação.
-    pub smart: bool,
     pub levels: VecDeque<f32>,
     pub lang_model: String,
 }
@@ -89,7 +85,6 @@ impl UiState {
             status: None,
             warning: None,
             feedback: None,
-            smart: false,
             levels: VecDeque::new(),
             lang_model,
         }
@@ -108,7 +103,6 @@ pub enum OsdEvent {
     PauseToggle,
     Commit,
     Cancel,
-    SmartToggle,
     Closed,
 }
 
@@ -415,12 +409,6 @@ impl KeyboardHandler for App {
             Some(OsdEvent::Commit)
         } else if event.keysym == Keysym::Escape {
             Some(OsdEvent::Cancel)
-        } else if event.keysym == Keysym::s
-            && !self.modifiers.ctrl
-            && !self.modifiers.alt
-            && !self.modifiers.logo
-        {
-            Some(OsdEvent::SmartToggle)
         } else {
             None
         };

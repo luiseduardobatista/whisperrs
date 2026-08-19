@@ -83,8 +83,6 @@ struct StatusOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    smart: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     exe: Option<String>,
 }
 
@@ -95,7 +93,6 @@ impl StatusOutput {
             state: Some(response.state.clone()),
             language: response.language.clone(),
             model: response.model.clone(),
-            smart: response.smart,
             exe: response.exe.clone(),
         }
     }
@@ -106,7 +103,6 @@ impl StatusOutput {
             state: None,
             language: None,
             model: None,
-            smart: None,
             exe: None,
         }
     }
@@ -392,14 +388,13 @@ mod tests {
             exe: Some("/bin/whisper".to_string()),
             language: Some("pt".to_string()),
             model: Some("small".to_string()),
-            smart: Some(true),
         };
 
         let output = StatusOutput::running(&response);
 
         assert_eq!(
             serde_json::to_string(&output).unwrap(),
-            r#"{"daemon":"running","state":"recording","language":"pt","model":"small","smart":true,"exe":"/bin/whisper"}"#
+            r#"{"daemon":"running","state":"recording","language":"pt","model":"small","exe":"/bin/whisper"}"#
         );
     }
 

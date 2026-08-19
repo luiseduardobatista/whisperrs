@@ -58,7 +58,7 @@ src/
 
 ```
 whisper toggle ──socket──► daemon (loop principal, recv_timeout até 1 s)
-                              ├─ thread OSD: wlr-layer-shell + teclas (Space/Enter/Esc/S)
+                              ├─ thread OSD: wlr-layer-shell + teclas (Space/Enter/Esc)
                               ├─ thread captura: lê stdout do pw-record em blocos
                               └─ thread worker: VAD → whisper → Qwen/fallback → insert
 ```
@@ -81,10 +81,10 @@ sessão antiga.
 - `record`: inicia em `Idle` e retoma em `Paused`; `commit` conclui;
   `cancel` descarta; `pause` pausa somente uma gravação.
 - Response operacional: `{ "state": str, "error": str|null }`.
-- Response de `status` também pode conter `exe`, `language`, `model` e `smart`.
+- Response de `status` também pode conter `exe`, `language` e `model`.
   Todos são opcionais para manter compatibilidade com daemons antigos. `exe`
   é o caminho do binário do daemon; `language` e `model` são os valores de
-  configuração aceitos pelo daemon; `smart` é o Smart Mode da sessão atual.
+  configuração aceitos pelo daemon.
 - O CLI projeta essa resposta para `status --json`, adicionando
   `{"daemon":"running"}`. Sem listener alcançável, retorna
   `{"daemon":"stopped"}` com exit code `0`; falhas reais de permissão,
@@ -98,8 +98,9 @@ Fases do daemon (`daemon.rs`): `Idle → Loading → Recording ⇄ Paused →
 Transcribing → Idle`. Erros e feedbacks temporários mantêm o daemon em `Idle`
 enquanto o OSD permanece visível até a deadline; isso deixa `status`,
 `cancel` e `stop` responsivos. O OSD tem a própria fase de UI (`osd.rs`:
-Loading, Recording, Paused, Transcribing, Info, Warning, Error). Feedbacks
-informativos e avisos usam cores próprias; falhas reais usam `Error`.
+Loading, Recording, Paused, Transcribing, Info, Error). Feedbacks informativos
+e avisos persistentes de dependências usam cores próprias; falhas reais usam
+`Error`.
 
 Fluxo de uma sessão:
 
@@ -124,8 +125,7 @@ Fluxo de uma sessão:
 7. `Esc`/`cancel` → `cancel_session`: mata captura, fecha OSD, descarta
    pendências. Em erros ou feedbacks como `nada detectado`, o OSD é mantido
    por uma deadline sem bloquear o loop; ao expirar, a sessão é cancelada.
-   O aviso de Smart indisponível é não fatal: mantém `Recording`/`Paused`,
-   deixa as ações disponíveis e desaparece na própria deadline.
+   Se o Qwen estiver indisponível, o fallback Rust continua sendo usado.
 
 **Invariante crítico:** a inserção acontece depois do `Closed`. Enquanto o
 OSD está visível ele segura o foco de teclado — `wtype` digitando antes
@@ -183,8 +183,8 @@ configuração fica em `[ai]`: `enabled`, `model`, `context_size`, `gpu` e
 `cleanup`. O modelo pode ser instalado com `whisper setup --ai-model
 qwen3.5-0.8b`; ele não é baixado pelo daemon. Se o binário, modelo ou resposta
 não estiverem disponíveis, o resultado é exatamente o fallback Rust atual
-(`remove_fillers` + `fix_punctuation`). A tecla `S` alterna o smart mode, que
-permite instruções naturais no início do ditado (como traduzir ou resumir).
+(`remove_fillers` + `fix_punctuation`). Com `ai.cleanup` desabilitado, o
+pipeline usa somente o cleanup Rust.
 
 O teste de integração do servidor real é ignorado por padrão e requer:
 
@@ -248,8 +248,8 @@ como prova de fala para o VAD — só áudio real.
 - `whisper status` responde `idle`/`recording`/`paused`/`transcribing`/
   `loading` — primeiro passo para saber onde o daemon está. Durante um
   feedback terminal, a sessão já está em `idle`, embora o OSD ainda mostre
-  a mensagem até a deadline. O aviso não fatal de Smart mantém o estado
-  `recording`/`paused`.
+  a mensagem até a deadline. Avisos de dependências permanecem no estado
+  `recording`/`paused` sem bloquear os controles.
 - `whisper status --json` emite somente JSON: `daemon` é `running` ou
   `stopped`; quando está rodando, `state` é a fase pública e os metadados de
   configuração/sessão podem aparecer. O estado `stopped` retorna exit code

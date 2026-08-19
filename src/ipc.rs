@@ -41,9 +41,6 @@ pub struct Response {
     /// Modelo configurado no daemon (preenchido somente em `status`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Smart Mode da sessão atual (preenchido somente em `status`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub smart: Option<bool>,
 }
 
 pub fn request(cmd: Cmd) -> Result<Response> {
@@ -133,7 +130,6 @@ mod tests {
         assert_eq!(resp.exe, None);
         assert_eq!(resp.language, None);
         assert_eq!(resp.model, None);
-        assert_eq!(resp.smart, None);
     }
 
     #[test]
@@ -144,7 +140,6 @@ mod tests {
             exe: Some("/nix/store/x-whisper/bin/.whisper-wrapped".to_string()),
             language: Some("pt".to_string()),
             model: Some("turbo".to_string()),
-            smart: Some(false),
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"exe\":\"/nix/store/x-whisper/bin/.whisper-wrapped\""));
@@ -155,7 +150,6 @@ mod tests {
         );
         assert_eq!(back.language.as_deref(), Some("pt"));
         assert_eq!(back.model.as_deref(), Some("turbo"));
-        assert_eq!(back.smart, Some(false));
     }
 
     #[test]
@@ -164,7 +158,6 @@ mod tests {
 
         assert_eq!(resp.language, None);
         assert_eq!(resp.model, None);
-        assert_eq!(resp.smart, None);
     }
 
     #[test]
