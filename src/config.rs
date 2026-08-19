@@ -88,7 +88,7 @@ impl Default for AiConfig {
     fn default() -> Self {
         AiConfig {
             enabled: false,
-            model: "qwen3.5-0.8b".to_string(),
+            model: "qwen3.5-2b".to_string(),
             context_size: 2048,
             gpu: true,
             cleanup: true,
@@ -261,7 +261,7 @@ mod tests {
             r#"
             [ai]
             enabled = false
-            model = "qwen3.5-0.8b"
+            model = "qwen3.5-2b"
             context_size = 4096
             gpu = false
             cleanup = false
@@ -269,7 +269,7 @@ mod tests {
         )
         .unwrap();
         assert!(!cfg.ai.enabled);
-        assert_eq!(cfg.ai.model, "qwen3.5-0.8b");
+        assert_eq!(cfg.ai.model, "qwen3.5-2b");
         assert_eq!(cfg.ai.context_size, 4096);
         assert!(!cfg.ai.gpu);
         assert!(!cfg.ai.cleanup);
@@ -316,7 +316,7 @@ mod tests {
     #[test]
     fn ai_model_path_resolves_catalog_and_direct_paths() {
         let _data_home = TempDataHome::new();
-        let catalog_path = crate::model::models_dir().join("Qwen_Qwen3.5-0.8B-Q5_K_M.gguf");
+        let catalog_path = crate::model::models_dir().join("Qwen_Qwen3.5-2B-Q5_K_M.gguf");
         std::fs::create_dir_all(catalog_path.parent().unwrap()).unwrap();
         std::fs::write(&catalog_path, b"teste").unwrap();
         let cfg = Config::default();

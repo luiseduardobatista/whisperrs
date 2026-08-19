@@ -69,7 +69,7 @@ Flags disponíveis:
 
 - `--lang pt|en|auto` e `--model ...` pulam essas escolhas;
 - `--insert-mode insert|clipboard|fallback|both` define como o texto será entregue (`type` continua aceito como alias legado);
-- `--ai-model qwen3.5-0.8b` habilita o Qwen e inclui seu download;
+- `--ai-model qwen3.5-2b` habilita o Qwen e inclui seu download;
 - `--no-ai` desabilita o Qwen sem baixá-lo;
 - `--yes` aceita o resumo sem confirmação e nunca inicia o daemon.
 

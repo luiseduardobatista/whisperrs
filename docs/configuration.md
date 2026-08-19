@@ -19,7 +19,7 @@ threads = 4
 
 [ai]
 enabled = false                 # o setup ativa somente se Qwen for escolhido
-model = "qwen3.5-0.8b"           # nome do catálogo ou caminho com '/'
+model = "qwen3.5-2b"            # nome do catálogo ou caminho com '/'
 context_size = 2048
 gpu = true
 cleanup = true                  # usa Qwen no cleanup normal quando disponível
@@ -37,7 +37,7 @@ cleanup = true                  # usa Qwen no cleanup normal quando disponível
 | `threads` | inteiro | `4` | threads da transcrição |
 | `source` | nome de nó PipeWire | `null` | fonte de áudio explícita (`pw-record --target`) |
 | `ai.enabled` | booleano | `false` no setup sem Qwen | habilita o pós-processamento Qwen quando modelo e `llama-server` existem |
-| `ai.model` | nome ou caminho | `qwen3.5-0.8b` | modelo GGUF; nomes usam o catálogo LLM |
+| `ai.model` | nome ou caminho | `qwen3.5-2b` | modelo GGUF; nomes usam o catálogo LLM |
 | `ai.context_size` | inteiro | `2048` | contexto passado ao `llama-server` |
 | `ai.gpu` | booleano | `true` | tenta carregar as camadas na GPU e cai para CPU se necessário |
 | `ai.cleanup` | booleano | `true` | usa Qwen no cleanup normal; desabilitado, usa somente o cleanup Rust |
@@ -95,7 +95,7 @@ Multilíngues, oficiais do whisper.cpp (HuggingFace), baixados para
 
 O `whisper setup` mostra um resumo e o tamanho aproximado dos arquivos que
 faltam antes de baixar o modelo escolhido **e** o modelo VAD (fixo). Com
-`--ai-model qwen3.5-0.8b` (ou respondendo "sim" à pergunta do wizard), habilita
+`--ai-model qwen3.5-2b` (ou respondendo "sim" à pergunta do wizard), habilita
 e baixa também o GGUF do Qwen; `--no-ai` desabilita o recurso sem baixar o
 modelo. O daemon nunca baixa modelos. O modelo de transcrição é carregado na
 primeira sessão de ditado e

@@ -178,10 +178,10 @@ pega automaticamente; se ela afetar o engine, inclua-a na comparação de
 ## Qwen (pós-processamento)
 
 O pós-processamento opcional usa `llama-server` ≥ b7973 como subprocesso local,
-com o modelo Qwen3.5-0.8B GGUF servido sob demanda em `127.0.0.1`. A
+com o modelo Qwen3.5-2B GGUF servido sob demanda em `127.0.0.1`. A
 configuração fica em `[ai]`: `enabled`, `model`, `context_size`, `gpu` e
 `cleanup`. O modelo pode ser instalado com `whisper setup --ai-model
-qwen3.5-0.8b`; ele não é baixado pelo daemon. Se o binário, modelo ou resposta
+qwen3.5-2b`; ele não é baixado pelo daemon. Se o binário, modelo ou resposta
 não estiverem disponíveis, o resultado é exatamente o fallback Rust atual
 (`remove_fillers` + `fix_punctuation`). Com `ai.cleanup` desabilitado, o
 pipeline usa somente o cleanup Rust.
@@ -189,7 +189,7 @@ pipeline usa somente o cleanup Rust.
 O teste de integração do servidor real é ignorado por padrão e requer:
 
 ```sh
-WHISPER_AI_MODEL=/caminho/Qwen_Qwen3.5-0.8B-Q5_K_M.gguf \
+WHISPER_AI_MODEL=/caminho/Qwen_Qwen3.5-2B-Q5_K_M.gguf \
   cargo test llm::tests::process_real_model -- --ignored
 ```
 

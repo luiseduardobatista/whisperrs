@@ -68,11 +68,11 @@ pub const MODELS: &[ModelSpec] = &[
 /// Modelos LLM (pós-processamento com Qwen); fora de `MODELS` (não
 /// selecionáveis no setup normal de transcrição).
 pub const LLM_MODELS: &[ModelSpec] = &[ModelSpec {
-    name: "qwen3.5-0.8b",
-    file: "Qwen_Qwen3.5-0.8B-Q5_K_M.gguf",
-    size_mb: 650,
+    name: "qwen3.5-2b",
+    file: "Qwen_Qwen3.5-2B-Q5_K_M.gguf",
+    size_mb: 1_570,
     description: "pós-processamento inteligente local",
-    base_url: "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main",
+    base_url: "https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main",
 }];
 
 /// Modelo VAD (Silero) fixo, baixado pelo `whisper setup` junto com o modelo
@@ -311,13 +311,13 @@ mod tests {
 
     #[test]
     fn llm_catalog_is_separate_and_exact() {
-        let spec = find_llm("qwen3.5-0.8b").unwrap();
-        assert!(find("qwen3.5-0.8b").is_none());
-        assert_eq!(spec.file, "Qwen_Qwen3.5-0.8B-Q5_K_M.gguf");
-        assert_eq!(spec.size_mb, 650);
+        let spec = find_llm("qwen3.5-2b").unwrap();
+        assert!(find("qwen3.5-2b").is_none());
+        assert_eq!(spec.file, "Qwen_Qwen3.5-2B-Q5_K_M.gguf");
+        assert_eq!(spec.size_mb, 1_570);
         assert_eq!(
             spec.base_url,
-            "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main"
+            "https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main"
         );
         assert!(find_llm("inexistente").is_none());
     }

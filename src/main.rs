@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn setup_rejects_conflicting_ai_choices() {
         assert!(
-            Cli::try_parse_from(["whisper", "setup", "--ai-model", "qwen3.5-0.8b", "--no-ai",])
+            Cli::try_parse_from(["whisper", "setup", "--ai-model", "qwen3.5-2b", "--no-ai",])
                 .is_err()
         );
     }

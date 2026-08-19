@@ -58,7 +58,7 @@ focada.
 - Detecção de voz (VAD): só os segmentos de fala vão para o whisper
   (silêncio e pausas longas ficam de fora).
 - Pós-processamento: remoção de fillers ("hmm", "ahn"…),
-  capitalização/pontuação e período final; opcionalmente Qwen3.5-0.8B local
+  capitalização/pontuação e período final; opcionalmente Qwen3.5-2B local
   via `llama-server` (com fallback automático para o cleanup Rust).
 - Inserção: `wtype` digita na app focada e `wl-copy` pode copiar o texto
   (modo configurável; o padrão preserva o clipboard e só copia se `wtype` falhar).
@@ -128,14 +128,14 @@ Referência completa de opções, modelos e download:
 [docs/configuration.md](docs/configuration.md).
 
 Para usar o pós-processamento Qwen, instale e habilite o modelo com
-`whisper setup --ai-model qwen3.5-0.8b --yes` (ou responda "sim" à pergunta do
+`whisper setup --ai-model qwen3.5-2b --yes` (ou responda "sim" à pergunta do
 setup) e mantenha `llama-server` no PATH. Para um setup totalmente scriptável
 sem Qwen, use `--no-ai --yes`:
 
 ```toml
 [ai]
 enabled = true
-model = "qwen3.5-0.8b"
+model = "qwen3.5-2b"
 context_size = 2048
 gpu = true
 cleanup = true

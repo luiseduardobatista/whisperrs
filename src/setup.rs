@@ -225,7 +225,7 @@ fn select_ai(
 
     if let Some(name) = options.ai_model.as_deref() {
         let spec = model::find_llm(name)
-            .ok_or_else(|| anyhow::anyhow!("modelo AI inválido: {name} (use qwen3.5-0.8b)"))?;
+            .ok_or_else(|| anyhow::anyhow!("modelo AI inválido: {name} (use qwen3.5-2b)"))?;
         cfg.ai.model = spec.name.to_string();
         return Ok((true, true));
     }
@@ -233,7 +233,7 @@ fn select_ai(
     if interactive {
         let current_enabled = cfg.ai.enabled && cfg.ai_model_path().is_some();
         let want_ai = Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt("Ativar pós-processamento inteligente local com Qwen (~650 MB)?")
+            .with_prompt("Ativar pós-processamento inteligente local com Qwen (~1,6 GB)?")
             .default(current_enabled)
             .interact()?;
         if want_ai {
@@ -292,7 +292,7 @@ impl SetupPlan {
                 );
             } else if cfg.ai_model_path().is_none() {
                 bail!(
-                    "modelo Qwen não encontrado: {}; desative AI ou escolha qwen3.5-0.8b",
+                    "modelo Qwen não encontrado: {}; desative AI ou escolha qwen3.5-2b",
                     cfg.ai.model
                 );
             }
@@ -492,7 +492,7 @@ mod tests {
     fn explicit_ai_model_enables_download_without_interaction() {
         let mut cfg = Config::default();
         let options = SetupOptions {
-            ai_model: Some("qwen3.5-0.8b".to_string()),
+            ai_model: Some("qwen3.5-2b".to_string()),
             ..SetupOptions::default()
         };
 
