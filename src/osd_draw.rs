@@ -135,7 +135,6 @@ fn phase_label(phase: Phase) -> &'static str {
         Phase::Paused => "pausado",
         Phase::Transcribing => "transcrevendo",
         Phase::Loading => "carregando",
-        Phase::Cleaning => "transcrevendo",
         Phase::Info => "informativo",
         Phase::Error => "erro",
     }
@@ -145,9 +144,7 @@ fn phase_color(phase: Phase) -> (u8, u8, u8) {
     match phase {
         Phase::Recording => GREEN,
         Phase::Error => RED,
-        Phase::Paused | Phase::Transcribing | Phase::Loading | Phase::Cleaning | Phase::Info => {
-            BLUE
-        }
+        Phase::Paused | Phase::Transcribing | Phase::Loading | Phase::Info => BLUE,
     }
 }
 
@@ -207,7 +204,7 @@ pub(crate) fn draw_card(
         Phase::Recording | Phase::Paused => {
             draw_recording_waveform(pix, ui, accent, layout, t);
         }
-        Phase::Transcribing | Phase::Loading | Phase::Cleaning => {
+        Phase::Transcribing | Phase::Loading => {
             draw_processing_indicator(pix, accent, layout.x, layout.y, layout.w, animation_time, t);
         }
         Phase::Info | Phase::Error => {
@@ -293,7 +290,7 @@ fn draw_status_indicator(
             fill_circle(pix, x, y, 2.0, (color.0, color.1, color.2, 255), t);
         }
         Phase::Paused => fill_circle(pix, x, y, 4.0, (color.0, color.1, color.2, 255), t),
-        Phase::Transcribing | Phase::Loading | Phase::Cleaning => {
+        Phase::Transcribing | Phase::Loading => {
             fill_circle(pix, x, y, 7.0, (color.0, color.1, color.2, 205), t);
             fill_circle(pix, x, y, 4.8, (16, 20, 25, 255), t);
             let angle = animation_time * 3.2;
@@ -453,7 +450,7 @@ fn center_status<'a>(ui: &'a UiState, label: &str) -> Option<&'a str> {
     }
     match ui.phase {
         Phase::Recording | Phase::Paused => ui.warning.as_deref(),
-        Phase::Transcribing | Phase::Cleaning => match ui.status.as_deref() {
+        Phase::Transcribing => match ui.status.as_deref() {
             Some(status) if !status.trim().eq_ignore_ascii_case(label) => Some(status),
             _ => Some("Processando…"),
         },
@@ -501,7 +498,7 @@ fn footer_actions(phase: Phase) -> Option<&'static [FooterAction]> {
     match phase {
         Phase::Recording => Some(RECORDING_ACTIONS),
         Phase::Paused => Some(PAUSED_ACTIONS),
-        Phase::Transcribing | Phase::Loading | Phase::Cleaning | Phase::Info | Phase::Error => None,
+        Phase::Transcribing | Phase::Loading | Phase::Info | Phase::Error => None,
     }
 }
 
@@ -717,7 +714,6 @@ mod tests {
             Phase::Paused,
             Phase::Transcribing,
             Phase::Loading,
-            Phase::Cleaning,
             Phase::Info,
             Phase::Error,
         ] {
@@ -783,7 +779,6 @@ mod tests {
     fn processing_and_feedback_states_do_not_show_recording_actions() {
         assert!(footer_actions(Phase::Transcribing).is_none());
         assert!(footer_actions(Phase::Loading).is_none());
-        assert!(footer_actions(Phase::Cleaning).is_none());
         assert!(footer_actions(Phase::Info).is_none());
         assert!(footer_actions(Phase::Error).is_none());
     }
@@ -807,9 +802,9 @@ mod tests {
     fn recording_shows_persistent_warning_without_hiding_actions() {
         let mut ui = UiState::new("pt · turbo".to_string());
         ui.phase = Phase::Recording;
-        ui.warning = Some("Qwen ausente".to_string());
+        ui.warning = Some("wtype ausente".to_string());
 
-        assert_eq!(center_status(&ui, "gravando"), Some("Qwen ausente"));
+        assert_eq!(center_status(&ui, "gravando"), Some("wtype ausente"));
         assert!(footer_actions(ui.phase).is_some());
     }
 
@@ -817,7 +812,7 @@ mod tests {
     fn inline_feedback_overrides_persistent_warning() {
         let mut ui = UiState::new("pt · turbo".to_string());
         ui.phase = Phase::Recording;
-        ui.warning = Some("Qwen ausente".to_string());
+        ui.warning = Some("wtype ausente".to_string());
         ui.feedback = Some(crate::osd::Feedback {
             kind: FeedbackKind::Info,
             message: "feedback temporário".to_string(),
@@ -843,10 +838,6 @@ mod tests {
             "wtype ausente — a digitação na app não vai funcionar (só clipboard)",
             "VAD ausente — transcrevendo sem filtro de voz; rode whisper setup",
             "wtype ausente (só clipboard) · VAD ausente (sem filtro de voz)",
-            "Qwen ausente — cleanup Rust; rode whisper setup",
-            "wtype e Qwen ausentes — digitação e cleanup limitados",
-            "VAD e Qwen ausentes — cleanup limitado; rode whisper setup",
-            "wtype, VAD e Qwen ausentes — digitação e cleanup limitados",
         ];
         for warning in warnings {
             assert!(

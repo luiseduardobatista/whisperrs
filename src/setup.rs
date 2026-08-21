@@ -21,9 +21,7 @@ const INSERT_ITEMS: [&str; 4] = [
 pub struct SetupOptions {
     pub lang: Option<String>,
     pub model: Option<String>,
-    pub ai_model: Option<String>,
     pub insert_mode: Option<String>,
-    pub no_ai: bool,
     pub yes: bool,
 }
 
@@ -31,7 +29,6 @@ pub struct SetupOptions {
 enum DownloadKind {
     Whisper,
     Vad,
-    Qwen,
 }
 
 struct PendingDownload {
@@ -56,21 +53,18 @@ struct DownloadReport {
 
 pub fn run(options: SetupOptions) -> Result<bool> {
     let interactive = is_interactive();
-    let config_exists = config::config_path().is_file();
     let mut cfg = Config::load()?;
 
     let lang = select_language(options.lang.as_deref(), cfg.language, interactive)?;
     let model = select_model(options.model.as_deref(), &cfg.model, interactive)?;
     let insert_mode =
         select_insert_mode(options.insert_mode.as_deref(), cfg.insert_mode, interactive)?;
-    let (ai_enabled, download_qwen) = select_ai(&options, &mut cfg, config_exists, interactive)?;
 
     cfg.language = lang;
     cfg.model = model.name.to_string();
     cfg.insert_mode = insert_mode;
-    cfg.ai.enabled = ai_enabled;
 
-    let plan = SetupPlan::new(cfg, model, download_qwen)?;
+    let plan = SetupPlan::new(cfg, model)?;
     print_summary(&plan);
 
     if !confirm_downloads(&plan, &options, interactive)? {
@@ -213,55 +207,8 @@ fn insert_mode_at(index: usize) -> InsertMode {
     }
 }
 
-fn select_ai(
-    options: &SetupOptions,
-    cfg: &mut Config,
-    config_exists: bool,
-    interactive: bool,
-) -> Result<(bool, bool)> {
-    if options.no_ai {
-        return Ok((false, false));
-    }
-
-    if let Some(name) = options.ai_model.as_deref() {
-        let spec = model::find_llm(name)
-            .ok_or_else(|| anyhow::anyhow!("modelo AI inválido: {name} (use qwen3.5-2b)"))?;
-        cfg.ai.model = spec.name.to_string();
-        return Ok((true, true));
-    }
-
-    if interactive {
-        let current_enabled = cfg.ai.enabled && cfg.ai_model_path().is_some();
-        let want_ai = Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt("Ativar pós-processamento inteligente local com Qwen (~1,6 GB)?")
-            .default(current_enabled)
-            .interact()?;
-        if want_ai {
-            ensure_catalog_ai_model(cfg)?;
-            return Ok((true, true));
-        }
-        return Ok((false, false));
-    }
-
-    if config_exists {
-        return Ok((cfg.ai.enabled, false));
-    }
-
-    Ok((false, false))
-}
-
-fn ensure_catalog_ai_model(cfg: &mut Config) -> Result<()> {
-    if model::find_llm(&cfg.ai.model).is_none() && cfg.ai_model_path().is_none() {
-        let spec = model::LLM_MODELS
-            .first()
-            .ok_or_else(|| anyhow::anyhow!("catálogo AI vazio"))?;
-        cfg.ai.model = spec.name.to_string();
-    }
-    Ok(())
-}
-
 impl SetupPlan {
-    fn new(cfg: Config, model: &'static model::ModelSpec, download_qwen: bool) -> Result<Self> {
+    fn new(cfg: Config, model: &'static model::ModelSpec) -> Result<Self> {
         let model_dest = model::models_dir().join(model.file);
         let vad_dest = model::vad_model_path();
         let mut pending = Vec::new();
@@ -280,23 +227,6 @@ impl SetupPlan {
             vad_dest.clone(),
             "modelo VAD",
         );
-
-        if cfg.ai.enabled && download_qwen {
-            if let Some(spec) = model::find_llm(&cfg.ai.model) {
-                add_pending(
-                    &mut pending,
-                    DownloadKind::Qwen,
-                    spec,
-                    model::models_dir().join(spec.file),
-                    "modelo Qwen",
-                );
-            } else if cfg.ai_model_path().is_none() {
-                bail!(
-                    "modelo Qwen não encontrado: {}; desative AI ou escolha qwen3.5-2b",
-                    cfg.ai.model
-                );
-            }
-        }
 
         Ok(Self {
             cfg,
@@ -335,11 +265,7 @@ fn print_summary(plan: &SetupPlan) {
         plan.model.name, plan.model.description
     );
     println!("  Inserção     {}", plan.cfg.insert_mode.label());
-    if plan.cfg.ai.enabled {
-        println!("  Qwen cleanup Ativado ({})", plan.cfg.ai.model);
-    } else {
-        println!("  Qwen cleanup Desativado");
-    }
+
 
     if plan.pending.is_empty() {
         println!();
@@ -377,17 +303,14 @@ fn confirm_downloads(plan: &SetupPlan, options: &SetupOptions, interactive: bool
 }
 
 fn all_choices_provided(options: &SetupOptions) -> bool {
-    options.lang.is_some()
-        && options.model.is_some()
-        && options.insert_mode.is_some()
-        && (options.ai_model.is_some() || options.no_ai)
+    options.lang.is_some() && options.model.is_some() && options.insert_mode.is_some()
 }
 
 fn execute_downloads(plan: &SetupPlan) -> Result<DownloadReport> {
     let mut report = DownloadReport::default();
     for download in &plan.pending {
         match download.kind {
-            DownloadKind::Whisper | DownloadKind::Qwen => {
+            DownloadKind::Whisper => {
                 ensure_downloaded(download.spec, &download.dest, download.label)?;
             }
             DownloadKind::Vad => {
@@ -411,14 +334,6 @@ fn print_completion(plan: &SetupPlan, report: &DownloadReport) {
     println!("Modelo em    {}", plan.model_dest.display());
     println!("VAD em       {}", plan.vad_dest.display());
     println!("Inserção     {}", plan.cfg.insert_mode.label());
-    println!(
-        "Qwen cleanup {}",
-        if plan.cfg.ai.enabled {
-            format!("ativado ({})", plan.cfg.ai.model)
-        } else {
-            "desativado".to_string()
-        }
-    );
     println!();
     println!("Próximo passo:");
     println!("  whisper start");
@@ -486,52 +401,6 @@ mod tests {
     #[test]
     fn invalid_insert_mode_is_rejected() {
         assert!(parse_insert_mode("invalid").is_err());
-    }
-
-    #[test]
-    fn explicit_ai_model_enables_download_without_interaction() {
-        let mut cfg = Config::default();
-        let options = SetupOptions {
-            ai_model: Some("qwen3.5-2b".to_string()),
-            ..SetupOptions::default()
-        };
-
-        assert_eq!(
-            select_ai(&options, &mut cfg, false, false).unwrap(),
-            (true, true)
-        );
-    }
-
-    #[test]
-    fn noninteractive_setup_preserves_existing_ai_choice() {
-        let mut cfg = Config::default();
-        cfg.ai.enabled = true;
-        let options = SetupOptions::default();
-
-        assert_eq!(
-            select_ai(&options, &mut cfg, true, false).unwrap(),
-            (true, false)
-        );
-    }
-
-    #[test]
-    fn direct_ai_model_path_is_not_replaced_by_catalog_model() {
-        let path = std::env::temp_dir().join(format!(
-            "whisper-setup-ai-{}-{}.gguf",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::write(&path, b"modelo").unwrap();
-
-        let mut cfg = Config::default();
-        cfg.ai.model = path.display().to_string();
-        ensure_catalog_ai_model(&mut cfg).unwrap();
-
-        assert_eq!(cfg.ai.model, path.display().to_string());
-        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

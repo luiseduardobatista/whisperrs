@@ -4,7 +4,6 @@ mod config;
 mod daemon;
 mod insert;
 mod ipc;
-mod llm;
 mod model;
 mod osd;
 mod osd_draw;
@@ -61,12 +60,8 @@ enum Command {
         lang: Option<String>,
         #[arg(long)]
         model: Option<String>,
-        #[arg(long = "ai-model", conflicts_with = "no_ai")]
-        ai_model: Option<String>,
         #[arg(long = "insert-mode")]
         insert_mode: Option<String>,
-        #[arg(long = "no-ai", conflicts_with = "ai_model")]
-        no_ai: bool,
         /// Aceita o resumo sem confirmação; nunca inicia o daemon.
         #[arg(long, short = 'y')]
         yes: bool,
@@ -124,17 +119,13 @@ fn main() -> Result<()> {
         Command::Setup {
             lang,
             model,
-            ai_model,
             insert_mode,
-            no_ai,
             yes,
         } => {
             let start_daemon = setup::run(setup::SetupOptions {
                 lang,
                 model,
-                ai_model,
                 insert_mode,
-                no_ai,
                 yes,
             })?;
             if start_daemon { start() } else { Ok(()) }
@@ -347,27 +338,11 @@ mod tests {
             "small",
             "--insert-mode",
             "both",
-            "--no-ai",
             "--yes",
         ])
         .unwrap();
 
-        assert!(matches!(
-            cli.cmd,
-            Command::Setup {
-                no_ai: true,
-                yes: true,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn setup_rejects_conflicting_ai_choices() {
-        assert!(
-            Cli::try_parse_from(["whisper", "setup", "--ai-model", "qwen3.5-2b", "--no-ai",])
-                .is_err()
-        );
+        assert!(matches!(cli.cmd, Command::Setup { yes: true, .. }));
     }
 
     #[test]

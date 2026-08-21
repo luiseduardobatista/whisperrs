@@ -65,16 +65,6 @@ pub const MODELS: &[ModelSpec] = &[
     },
 ];
 
-/// Modelos LLM (pós-processamento com Qwen); fora de `MODELS` (não
-/// selecionáveis no setup normal de transcrição).
-pub const LLM_MODELS: &[ModelSpec] = &[ModelSpec {
-    name: "qwen3.5-2b",
-    file: "Qwen_Qwen3.5-2B-Q5_K_M.gguf",
-    size_mb: 1_570,
-    description: "pós-processamento inteligente local",
-    base_url: "https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main",
-}];
-
 /// Modelo VAD (Silero) fixo, baixado pelo `whisper setup` junto com o modelo
 /// de transcrição. Fica fora de `MODELS`: não é modelo selecionável.
 pub const VAD_MODEL: ModelSpec = ModelSpec {
@@ -95,10 +85,6 @@ const BUF_SIZE: usize = 256 * 1024;
 
 pub fn find(name: &str) -> Option<&'static ModelSpec> {
     MODELS.iter().find(|m| m.name == name)
-}
-
-pub fn find_llm(name: &str) -> Option<&'static ModelSpec> {
-    LLM_MODELS.iter().find(|m| m.name == name)
 }
 
 pub fn file_name(name: &str) -> Option<&'static str> {
@@ -307,19 +293,6 @@ mod tests {
         }
         assert_eq!(find("turbo").unwrap().file, "ggml-large-v3-turbo.bin");
         assert!(find("inexistente").is_none());
-    }
-
-    #[test]
-    fn llm_catalog_is_separate_and_exact() {
-        let spec = find_llm("qwen3.5-2b").unwrap();
-        assert!(find("qwen3.5-2b").is_none());
-        assert_eq!(spec.file, "Qwen_Qwen3.5-2B-Q5_K_M.gguf");
-        assert_eq!(spec.size_mb, 1_570);
-        assert_eq!(
-            spec.base_url,
-            "https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main"
-        );
-        assert!(find_llm("inexistente").is_none());
     }
 
     #[test]

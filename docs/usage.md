@@ -7,7 +7,7 @@ com compositor/systemd e os problemas comuns.
 
 | Comando | Descrição |
 |---------|-----------|
-| `whisper setup [--lang pt\|en\|auto] [--model …] [--insert-mode insert\|clipboard\|fallback\|both] [--ai-model …\|--no-ai] [--yes]` | onboarding: escolhas, resumo e download (gera o `config.toml`) |
+| `whisper setup [--lang pt\|en\|auto] [--model …] [--insert-mode insert\|clipboard\|fallback\|both] [--yes]` | onboarding: escolhas, resumo e download (gera o `config.toml`) |
 | `whisper start` | sobe o daemon em background; idempotente |
 | `whisper stop` | para o daemon; é sucesso se ele já estiver parado |
 | `whisper restart` | compõe `stop` e `start`, aguardando o socket antigo sair |
@@ -60,27 +60,24 @@ Falhas de permissão, transporte, leitura ou parsing não são convertidas em
 
 ### setup
 
-`whisper setup` coleta idioma, modelo, modo de inserção e a decisão sobre o
-Qwen antes de qualquer download. O modelo `small` é o recomendado para uma
-instalação nova; modelos existentes continuam selecionados ao repetir o setup.
+`whisper setup` coleta idioma, modelo e modo de inserção antes de qualquer
+download. O modelo `small` é o recomendado para uma instalação nova; modelos
+existentes continuam selecionados ao repetir o setup.
 O resumo mostra os componentes ausentes e o tamanho aproximado antes de baixar.
 
 Flags disponíveis:
 
 - `--lang pt|en|auto` e `--model ...` pulam essas escolhas;
 - `--insert-mode insert|clipboard|fallback|both` define como o texto será entregue (`type` continua aceito como alias legado);
-- `--ai-model qwen3.5-2b` habilita o Qwen e inclui seu download;
-- `--no-ai` desabilita o Qwen sem baixá-lo;
 - `--yes` aceita o resumo sem confirmação e nunca inicia o daemon.
 
 Para uso não interativo, forneça todas as escolhas ou use `--yes`, por exemplo:
 
 ```sh
-whisper setup --lang pt --model small --insert-mode fallback --no-ai --yes
+whisper setup --lang pt --model small --insert-mode fallback --yes
 ```
 
-Sem flags de AI, o modo interativo pergunta e começa com Qwen desativado quando
-não há modelo instalado. Ao terminar, somente o modo interativo oferece iniciar
+Ao terminar, somente o modo interativo oferece iniciar
 o daemon. O modelo é carregado sob demanda. O download usa **conexões
 paralelas** (HTTP Range, até 16, como o aria2c `-x 16`) para aproveitar a banda;
 falha remove o arquivo parcial para não envenenar uma próxima tentativa.
@@ -114,8 +111,7 @@ Fluxo interno de uma sessão:
 6. `Esc`/`cancel` descarta explicitamente a sessão, inclusive durante o
    carregamento ou a transcrição. Mensagens temporárias de erro ou de ausência
    de fala permanecem no OSD pelo tempo planejado sem bloquear `status`,
-   `stop` ou novos comandos. Se o Qwen estiver indisponível, o fallback Rust
-   continua sendo usado.
+   `stop` ou novos comandos.
 
 A língua é forçada no modelo (mais rápido e preciso que auto-detect); `auto`
 deixa o whisper decidir. Acentos vêm do próprio modelo.

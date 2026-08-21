@@ -26,11 +26,10 @@ vida do daemon continua em `main.rs`: o setup apenas retorna ao CLI se o
 usuário interativo pediu para iniciar o daemon.
 
 Dependências de runtime (fora do shell): `pw-record` (PipeWire), `wtype`,
-`wl-copy`, driver Vulkan e, opcionalmente, `llama-server` (llama.cpp ≥ b7973)
-no PATH. O pacote do flake (`nix build .#default`) já inclui `wtype`,
-`wl-copy` e `llama-server` (`llama-cpp-vulkan`) no PATH via wrapper — quem
+`wl-copy` e driver Vulkan no PATH. O pacote do flake (`nix build .#default`)
+já inclui `wtype` e `wl-clipboard` no PATH via wrapper — quem
 instala por outros meios instala os programas no sistema —; o app avisa
-(console, log e rodapé do OSD) se `wtype` ou Qwen estiverem indisponíveis.
+(console, log e rodapé do OSD) se `wtype` ou o VAD estiverem indisponíveis.
 O stderr do daemon em background vai para
 `~/.local/state/whisper/daemon.log`; para ver logs ao vivo, rode `whisper
 daemon` em primeiro plano.
@@ -44,7 +43,6 @@ src/
   ipc.rs         # protocolo: socket Unix + JSON por linha
   config.rs      # config.toml, caminhos XDG, mtime (hot reload)
   model.rs       # catálogo de modelos + download paralelo (HTTP Range)
-  llm.rs         # cliente local do llama-server (Qwen, opcional)
   setup.rs       # onboarding, resumo e downloads (dialoguer)
   audio.rs       # captura pw-record (f32 mono 16 kHz)
   transcribe.rs  # engine whisper.cpp (whisper-rs, Vulkan) + VAD residente
@@ -60,12 +58,12 @@ src/
 whisper toggle ──socket──► daemon (loop principal, recv_timeout até 1 s)
                               ├─ thread OSD: wlr-layer-shell + teclas (Space/Enter/Esc)
                               ├─ thread captura: lê stdout do pw-record em blocos
-                              └─ thread worker: VAD → whisper → Qwen/fallback → insert
+                              └─ thread worker: VAD → whisper → cleanup Rust → insert
 ```
 
 O daemon é um loop de eventos sem async: tudo é `std::thread` + canais
 `mpsc`. A CLI nunca fala com o OSD/áudio diretamente — só via IPC. O setup
-não interativo usa flags (`--insert-mode`, `--ai-model`, `--no-ai` e `--yes`)
+não interativo usa flags (`--insert-mode` e `--yes`)
 e não inicia o daemon. Feedbacks
 temporários usam um deadline monotônico; o `recv_timeout` espera no máximo até
 essa deadline, sem bloquear o processamento de eventos. Eventos vindos de
@@ -111,11 +109,9 @@ Fluxo de uma sessão:
    `Recording`. Chunks de áudio viram amostras no buffer + nível RMS para a
    waveform somente enquanto a fase é `Recording`.
 3. `toggle`/`Enter`/`commit` em `Recording` ou `Paused` → para a captura e manda
-   o buffer para a thread worker (VAD → whisper → Qwen/fallback → inserção).
+   o buffer para a thread worker (VAD → whisper → cleanup Rust → inserção).
    O VAD (Silero, CPU) extrai os segmentos de fala do buffer e concatena só
-   eles — silêncio das bordas e pausas longas não vão para o whisper. O Qwen só
-   é tentado quando está habilitado e disponível; qualquer falha volta ao
-   cleanup Rust.
+   eles — silêncio das bordas e pausas longas não vão para o whisper.
 4. `toggle` durante `Loading` ou `Transcribing` é no-op; o trabalho em
    andamento não é descartado.
 5. `handle_worker` agenda `pending_insert` e fecha o OSD imediatamente — sem
@@ -125,7 +121,6 @@ Fluxo de uma sessão:
 7. `Esc`/`cancel` → `cancel_session`: mata captura, fecha OSD, descarta
    pendências. Em erros ou feedbacks como `nada detectado`, o OSD é mantido
    por uma deadline sem bloquear o loop; ao expirar, a sessão é cancelada.
-   Se o Qwen estiver indisponível, o fallback Rust continua sendo usado.
 
 **Invariante crítico:** a inserção acontece depois do `Closed`. Enquanto o
 OSD está visível ele segura o foco de teclado — `wtype` digitando antes
@@ -166,32 +161,13 @@ modelo ausente/falho; nunca é opção de config).
 - Campos de sessão valem na próxima sessão; `model`/`gpu_device`/`threads`
   mudados marcam `pending_engine_reload`, e `reload_engine_if_pending`
   recarrega o engine em background quando o daemon está ocioso (falha
-  mantém o atual). Mudanças em `[ai]` valem na próxima sessão e matam o
-  servidor LLM; não recarregam o engine do whisper. O VAD não tem opção de
+  mantém o atual). O VAD não tem opção de
   config; instalar o modelo VAD com o daemon ativo exige reiniciar o daemon
   para ser carregado.
 
 Ao adicionar uma opção nova em `config.rs` (com default), o hot reload a
 pega automaticamente; se ela afetar o engine, inclua-a na comparação de
 `reload_config_if_changed`.
-
-## Qwen (pós-processamento)
-
-O pós-processamento opcional usa `llama-server` ≥ b7973 como subprocesso local,
-com o modelo Qwen3.5-2B GGUF servido sob demanda em `127.0.0.1`. A
-configuração fica em `[ai]`: `enabled`, `model`, `context_size`, `gpu` e
-`cleanup`. O modelo pode ser instalado com `whisper setup --ai-model
-qwen3.5-2b`; ele não é baixado pelo daemon. Se o binário, modelo ou resposta
-não estiverem disponíveis, o resultado é exatamente o fallback Rust atual
-(`remove_fillers` + `fix_punctuation`). Com `ai.cleanup` desabilitado, o
-pipeline usa somente o cleanup Rust.
-
-O teste de integração do servidor real é ignorado por padrão e requer:
-
-```sh
-WHISPER_AI_MODEL=/caminho/Qwen_Qwen3.5-2B-Q5_K_M.gguf \
-  cargo test llm::tests::process_real_model -- --ignored
-```
 
 ## Download de modelos (model.rs)
 
@@ -225,9 +201,9 @@ cargo test
 ```
 
 Cobertura: pós-processamento (fillers/pontuação/RMS), parse de config e
-Content-Range, catálogo de modelos (inclui VAD e Qwen), concatenação de
-segmentos do VAD, validação do pós-processamento Qwen, composição de avisos do
-OSD, smoke test do OSD, modo de inserção.
+Content-Range, catálogo de modelos (silero e whisper), concatenação de
+segmentos do VAD, composição de avisos do OSD, smoke test do OSD, modo de
+inserção.
 
 Integração real (ignorada por padrão — precisa modelo, VAD e WAV):
 

@@ -49,7 +49,6 @@ pub enum Phase {
     Paused,
     Transcribing,
     Loading,
-    Cleaning,
     Info,
     Error,
 }

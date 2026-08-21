@@ -16,13 +16,6 @@ final_period = true    # garante ponto final
 gpu_device = 0
 threads = 4
 # source = "nome.do.no.pipewire"   # fonte de áudio explícita (pw-record --target)
-
-[ai]
-enabled = false                 # o setup ativa somente se Qwen for escolhido
-model = "qwen3.5-2b"            # nome do catálogo ou caminho com '/'
-context_size = 2048
-gpu = true
-cleanup = true                  # usa Qwen no cleanup normal quando disponível
 ```
 
 | Opção | Valores | Default | Efeito |
@@ -36,11 +29,6 @@ cleanup = true                  # usa Qwen no cleanup normal quando disponível
 | `gpu_device` | inteiro | `0` | índice do dispositivo Vulkan |
 | `threads` | inteiro | `4` | threads da transcrição |
 | `source` | nome de nó PipeWire | `null` | fonte de áudio explícita (`pw-record --target`) |
-| `ai.enabled` | booleano | `false` no setup sem Qwen | habilita o pós-processamento Qwen quando modelo e `llama-server` existem |
-| `ai.model` | nome ou caminho | `qwen3.5-2b` | modelo GGUF; nomes usam o catálogo LLM |
-| `ai.context_size` | inteiro | `2048` | contexto passado ao `llama-server` |
-| `ai.gpu` | booleano | `true` | tenta carregar as camadas na GPU e cai para CPU se necessário |
-| `ai.cleanup` | booleano | `true` | usa Qwen no cleanup normal; desabilitado, usa somente o cleanup Rust |
 
 `insert_mode = "type"` continua aceito como alias legado de `"insert"`. Configurações
 existentes com `"both"` preservam o comportamento anterior; o novo padrão só se
@@ -94,10 +82,8 @@ Multilíngues, oficiais do whisper.cpp (HuggingFace), baixados para
 | `turbo` | rápido em hardware forte · download maior | `ggml-large-v3-turbo.bin` | 1,6 GB |
 
 O `whisper setup` mostra um resumo e o tamanho aproximado dos arquivos que
-faltam antes de baixar o modelo escolhido **e** o modelo VAD (fixo). Com
-`--ai-model qwen3.5-2b` (ou respondendo "sim" à pergunta do wizard), habilita
-e baixa também o GGUF do Qwen; `--no-ai` desabilita o recurso sem baixar o
-modelo. O daemon nunca baixa modelos. O modelo de transcrição é carregado na
+faltam antes de baixar o modelo escolhido **e** o modelo VAD (fixo).
+O daemon nunca baixa modelos. O modelo de transcrição é carregado na
 primeira sessão de ditado e
 fica residente em VRAM até o daemon parar. Os downloads usam **conexões
 paralelas** (HTTP Range,
@@ -115,8 +101,6 @@ recarrega a config sem reiniciar:
   numa gravação em andamento, no momento do `Enter`.
 - **`model`/`gpu_device`/`threads`** recarregam o modelo em background quando
   o daemon está ocioso; em caso de falha, mantém o modelo atual.
-- **`[ai]`** vale na próxima sessão e mata o servidor LLM; não recarrega o
-  engine do whisper.
 - **Config inválida** (erro de TOML) é ignorada: o daemon mantém a anterior e
   loga o erro em `~/.local/state/whisper/daemon.log`.
 
